@@ -2095,9 +2095,278 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Spreadsheet - horizontally scrollable on mobile */}
-      <div className="flex-1 overflow-auto">
-        <div className="min-w-[800px] md:min-w-0">
+      {/* Mobile Card View */}
+      <div className="flex-1 overflow-auto md:hidden">
+        <div className="divide-y">
+          {positions.map((pos) => {
+            const posKey = pos.contractAddress?.toLowerCase() || pos.symbol
+            const isExpanded = expandedToken === posKey
+            const journal = tokenJournals[pos.symbol]
+
+            // Calculate P&L percent for display
+            const getPnlPercent = () => {
+              if (pos.totalInvestedUsd <= 0) return null
+              const totalValue = pos.hasOpenPosition && pos.currentPrice
+                ? pos.totalReturnedUsd + (pos.netQuantity * pos.currentPrice)
+                : pos.totalReturnedUsd
+              if (totalValue <= 0 && pos.totalReturnedUsd <= 0) return null
+              return ((totalValue - pos.totalInvestedUsd) / pos.totalInvestedUsd) * 100
+            }
+            const pnlPercent = getPnlPercent()
+
+            return (
+              <div key={posKey}>
+                {/* Position Card */}
+                <div
+                  onClick={() => toggleToken(posKey, pos.symbol)}
+                  className={`p-3 cursor-pointer transition-colors ${
+                    isExpanded ? 'bg-accent' : 'active:bg-accent'
+                  }`}
+                >
+                  {/* Top Row: Token + Status */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {pos.image ? (
+                        <img src={pos.image} alt="" className="w-6 h-6 bg-muted flex-shrink-0" />
+                      ) : (
+                        <div className="w-6 h-6 bg-muted flex items-center justify-center text-[10px] font-medium flex-shrink-0">
+                          {pos.symbol.charAt(0)}
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-medium text-sm">{pos.symbol}</div>
+                        {pos.name && <div className="text-[10px] text-muted-foreground truncate max-w-[150px]">{pos.name}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 ${pos.hasOpenPosition ? 'text-blue-500 bg-blue-500/10' : 'text-muted-foreground bg-muted'}`}>
+                        {pos.hasOpenPosition ? 'OPEN' : 'CLOSED'}
+                      </span>
+                      {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </div>
+                  </div>
+
+                  {/* Price Row */}
+                  <div className="flex items-center gap-3 mb-2 text-xs">
+                    <span className="tabular-nums font-medium">
+                      {pos.currentPrice ? formatCurrency(pos.currentPrice) : '—'}
+                    </span>
+                    {pos.priceChange24h && (
+                      <span className={`tabular-nums text-[10px] ${pos.priceChange24h > 0 ? 'text-green-500' : pos.priceChange24h < 0 ? 'text-red-500' : ''}`}>
+                        {pos.priceChange24h > 0 ? '+' : ''}{pos.priceChange24h.toFixed(1)}%
+                      </span>
+                    )}
+                    <span className="text-muted-foreground text-[10px]">
+                      {pos.buys.length}B / {pos.sells.length}S
+                    </span>
+                  </div>
+
+                  {/* Stats Row */}
+                  <div className="grid grid-cols-3 gap-2 text-[10px]">
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wider">Invested</div>
+                      <div className="tabular-nums font-medium">{formatCurrency(pos.totalInvestedUsd)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wider">Returned</div>
+                      <div className="tabular-nums font-medium">{formatCurrency(pos.totalReturnedUsd)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wider">P&L</div>
+                      <div className={`tabular-nums font-medium ${getPnlColor(pos.realizedPnlUsd)}`}>
+                        {formatCurrency(pos.realizedPnlUsd)}
+                        {pnlPercent !== null && (
+                          <span className={`ml-1 ${getPnlColor(pnlPercent)}`}>
+                            ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(0)}%)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded Details */}
+                {isExpanded && (
+                  <div className="bg-muted/30 border-t p-3" onClick={(e) => e.stopPropagation()}>
+                    {/* Contract Address */}
+                    {pos.contractAddress && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(pos.contractAddress!)
+                          setCopiedAddress(pos.contractAddress)
+                          setTimeout(() => setCopiedAddress(null), 2000)
+                        }}
+                        className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 font-mono mb-3"
+                      >
+                        {pos.contractAddress.slice(0, 8)}...{pos.contractAddress.slice(-6)}
+                        {copiedAddress === pos.contractAddress ? (
+                          <Check className="h-2.5 w-2.5 text-green-500" />
+                        ) : (
+                          <Copy className="h-2.5 w-2.5" />
+                        )}
+                      </button>
+                    )}
+
+                    {/* Tabs */}
+                    <div className="flex gap-1 mb-3">
+                      <button
+                        onClick={() => setActiveTab('trades')}
+                        className={`px-2 py-1 text-[10px] uppercase tracking-wider transition-colors ${
+                          activeTab === 'trades'
+                            ? 'bg-foreground text-background font-medium'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Trades
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('journal')}
+                        className={`px-2 py-1 text-[10px] uppercase tracking-wider transition-colors ${
+                          activeTab === 'journal'
+                            ? 'bg-foreground text-background font-medium'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Journal
+                      </button>
+                    </div>
+
+                    {/* Trades Tab - Mobile */}
+                    {activeTab === 'trades' && (
+                      <div className="space-y-2">
+                        {[...pos.buys, ...pos.sells]
+                          .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
+                          .map((trade) => (
+                            <div key={trade.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-medium flex items-center gap-0.5 ${
+                                  trade.direction === 'buy' ? 'text-green-500' : 'text-red-500'
+                                }`}>
+                                  {trade.direction === 'buy' ? (
+                                    <ArrowUpRight className="h-3 w-3" />
+                                  ) : (
+                                    <ArrowDownRight className="h-3 w-3" />
+                                  )}
+                                  {trade.direction.toUpperCase()}
+                                </span>
+                                <span className="text-xs tabular-nums">{formatCurrency(trade.total_value)}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-muted-foreground">{formatDateTime(trade.entry_date)}</span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDelete(trade.id); }}
+                                  className="text-muted-foreground hover:text-destructive p-1"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openManualSell(pos)}
+                          className="h-8 text-xs w-full mt-2"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add Sell
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Journal Tab - Mobile (same structure as desktop) */}
+                    {activeTab === 'journal' && (
+                      <div className="space-y-3">
+                        {/* Tags */}
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Tags</div>
+                          <div className="flex flex-wrap gap-1 items-center">
+                            {(journal?.tagIds || []).length > 0 ? (
+                              (journal?.tagIds || []).map((tagId) => {
+                                const tag = allTags.find(t => t.id === tagId)
+                                if (!tag) return null
+                                return (
+                                  <span
+                                    key={tag.id}
+                                    className="px-2 py-0.5 text-[11px] font-bold border bg-foreground text-background border-foreground"
+                                  >
+                                    {tag.name}
+                                  </span>
+                                )
+                              })
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">No tags</span>
+                            )}
+                            <button
+                              onClick={() => setShowCreateTag(true)}
+                              className="px-1.5 py-0.5 text-[10px] border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                            >
+                              + Edit
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Thesis */}
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Thesis</div>
+                          <Textarea
+                            value={journal?.thesis || ''}
+                            onChange={(e) => updateTokenJournal(pos.symbol, 'thesis', e.target.value)}
+                            placeholder="Why did you enter this trade?"
+                            className="min-h-[60px] text-xs resize-none"
+                          />
+                        </div>
+
+                        {/* Reflection */}
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Reflection</div>
+                          <Textarea
+                            value={journal?.reflection || ''}
+                            onChange={(e) => updateTokenJournal(pos.symbol, 'reflection', e.target.value)}
+                            placeholder="What did you learn?"
+                            className="min-h-[60px] text-xs resize-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+                      {pos.hasOpenPosition && (
+                        <button
+                          type="button"
+                          onClick={() => handleClosePosition(pos.contractAddress, pos.symbol)}
+                          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-orange-500 transition-colors px-2 py-1"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          Close
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteToken(pos.contractAddress, pos.symbol)}
+                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors px-2 py-1"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {positions.length === 0 && searchQuery && (
+          <div className="text-center py-12 text-sm text-muted-foreground">
+            No positions match "{searchQuery}"
+          </div>
+        )}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="flex-1 overflow-auto hidden md:block">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-background border-b">
             <tr className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -2453,7 +2722,6 @@ export default function Home() {
             })}
           </tbody>
         </table>
-        </div>
 
         {positions.length === 0 && searchQuery && (
           <div className="text-center py-12 text-sm text-muted-foreground">
