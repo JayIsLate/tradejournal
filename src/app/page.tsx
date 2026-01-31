@@ -296,30 +296,70 @@ export default function Home() {
   }
 
   const recalculateUsdValues = async () => {
-    if (!confirm('This will recalculate USD values for all trades by fixing total_value = price × quantity. Your journal entries will be preserved. Continue?')) return
+    if (!confirm('This will recalculate USD values for all trades using current SOL price. Your journal entries will be preserved. Continue?')) return
 
     try {
       setSyncing(true)
+
+      // Fetch current SOL price
+      let currentSolPrice = 200 // fallback
+      try {
+        const priceRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd')
+        const priceData = await priceRes.json()
+        currentSolPrice = priceData.solana?.usd || 200
+        console.log('Current SOL price for USD recalculation:', currentSolPrice)
+      } catch (e) {
+        console.warn('Failed to fetch SOL price, using fallback:', currentSolPrice)
+      }
 
       const allTrades = await db.getTrades()
       let updatedCount = 0
       let totalBefore = 0
       let totalAfter = 0
 
+      const stablecoins = ['USDC', 'USDT', 'DAI', 'BUSD', 'UST', 'FRAX', 'TUSD', 'USDP', 'GUSD', 'LUSD']
+
       for (const trade of allTrades) {
-        // The correct total_value should be: entry_price * quantity
-        // This gives the actual USD/stablecoin amount spent or received
-        const correctTotalValue = trade.entry_price * trade.quantity
+        const existingBaseCurrency = ((trade as any).base_currency || '').toUpperCase()
+        const existingBaseUsdPrice = (trade as any).base_currency_usd_price
+        const existingTotalValueUsd = trade.total_value_usd
 
-        totalBefore += trade.total_value
-        totalAfter += correctTotalValue
+        totalBefore += existingTotalValueUsd || trade.total_value
 
-        // Update the trade with corrected values
+        // Determine base currency and USD price
+        let baseCurrency = existingBaseCurrency
+        let baseCurrencyUsdPrice = existingBaseUsdPrice
+
+        if (!baseCurrency || !baseCurrencyUsdPrice) {
+          // No base currency info - infer from trade context
+          // If total_value is very small (< 100), likely SOL-denominated
+          // If total_value is larger (100+), might be USDC
+          if (trade.total_value < 100) {
+            baseCurrency = 'SOL'
+            baseCurrencyUsdPrice = currentSolPrice
+          } else {
+            baseCurrency = 'USDC'
+            baseCurrencyUsdPrice = 1
+          }
+        }
+
+        // Calculate correct USD value
+        let totalValueUsd: number
+        if (stablecoins.includes(baseCurrency)) {
+          // Stablecoin base: total_value is already in USD
+          totalValueUsd = trade.total_value
+        } else {
+          // SOL/WETH base: multiply by USD price
+          totalValueUsd = trade.total_value * baseCurrencyUsdPrice
+        }
+
+        totalAfter += totalValueUsd
+
+        // Update the trade
         await db.updateTrade(trade.id, {
-          total_value: correctTotalValue,
-          base_currency: 'USDC',
-          base_currency_usd_price: 1,
-          total_value_usd: correctTotalValue,
+          base_currency: baseCurrency,
+          base_currency_usd_price: baseCurrencyUsdPrice,
+          total_value_usd: totalValueUsd,
         } as any)
         updatedCount++
       }
@@ -328,8 +368,8 @@ export default function Home() {
       const updatedTrades = await db.getTrades()
       setTrades(updatedTrades)
 
-      console.log(`Fixed total_value: Before sum=$${totalBefore.toFixed(2)}, After sum=$${totalAfter.toFixed(2)}`)
-      alert(`Fixed ${updatedCount} trades!\n\nBefore: $${totalBefore.toFixed(2)}\nAfter: $${totalAfter.toFixed(2)}`)
+      console.log(`Fixed USD values: Before=$${totalBefore.toFixed(2)}, After=$${totalAfter.toFixed(2)}`)
+      alert(`Fixed ${updatedCount} trades!\n\nBefore: $${totalBefore.toFixed(2)}\nAfter: $${totalAfter.toFixed(2)}\n\nSOL price used: $${currentSolPrice}`)
     } catch (error) {
       console.error('Failed to recalculate USD values:', error)
       alert('Failed to recalculate: ' + error)
@@ -862,28 +902,57 @@ export default function Home() {
           // Direction validation from description - override if description contradicts parsed direction
           const descForValidation = (tx.description || '').toLowerCase()
           let directionCorrected = false
+
+          // Determine what description implies about direction
+          let descriptionImpliesSell = false
+          let descriptionImpliesBuy = false
+
           if (descForValidation.includes('sold') || descForValidation.includes('sell')) {
-            // Description says SELL - verify we have isSell
-            if (isBuy && !isSell) {
-              // We incorrectly determined BUY, but description says SELL - swap direction
-              console.log(`Direction correction: description says SELL but parsed as BUY, swapping tokenIn/tokenOut for ${tokenInSymbol} -> ${tokenOutSymbol}`)
-              // Swap tokenIn and tokenOut to fix direction
-              const temp = { ...tokenIn }
-              tokenIn = { ...tokenOut }
-              tokenOut = temp
-              directionCorrected = true
-            }
+            descriptionImpliesSell = true
           } else if (descForValidation.includes('bought') || descForValidation.includes('buy')) {
-            // Description says BUY - verify we have isBuy
-            if (isSell && !isBuy) {
-              // We incorrectly determined SELL, but description says BUY - swap direction
-              console.log(`Direction correction: description says BUY but parsed as SELL, swapping tokenIn/tokenOut for ${tokenInSymbol} -> ${tokenOutSymbol}`)
-              // Swap tokenIn and tokenOut to fix direction
-              const temp = { ...tokenIn }
-              tokenIn = { ...tokenOut }
-              tokenOut = temp
-              directionCorrected = true
+            descriptionImpliesBuy = true
+          } else if (descForValidation.includes('swapped')) {
+            // Parse "swapped X TOKEN for Y SOL/USDC" pattern
+            // If the trade token (non-base) appears before "for" and base currency after, it's a SELL
+            const swappedIdx = descForValidation.indexOf('swapped')
+            const forIdx = descForValidation.indexOf(' for ')
+            if (swappedIdx !== -1 && forIdx !== -1) {
+              const beforeFor = descForValidation.slice(swappedIdx, forIdx).toLowerCase()
+              const afterFor = descForValidation.slice(forIdx).toLowerCase()
+
+              // Check which token is mentioned where
+              const tradeTokenSymbol = (isBuy ? tokenOut.symbol : tokenIn.symbol).toLowerCase()
+              const baseSymbols = ['sol', 'usdc', 'usdt', 'weth', 'eth']
+              const hasTradeTokenBeforeFor = tradeTokenSymbol && beforeFor.includes(tradeTokenSymbol)
+              const hasBaseAfterFor = baseSymbols.some(s => afterFor.includes(s))
+              const hasTradeTokenAfterFor = tradeTokenSymbol && afterFor.includes(tradeTokenSymbol)
+              const hasBaseBeforeFor = baseSymbols.some(s => beforeFor.includes(s))
+
+              if (hasTradeTokenBeforeFor && hasBaseAfterFor) {
+                // "swapped TOKEN for SOL" = SELL
+                descriptionImpliesSell = true
+                console.log(`Swapped pattern detected: ${tradeTokenSymbol} before FOR, base after FOR → SELL`)
+              } else if (hasBaseBeforeFor && hasTradeTokenAfterFor) {
+                // "swapped SOL for TOKEN" = BUY
+                descriptionImpliesBuy = true
+                console.log(`Swapped pattern detected: base before FOR, ${tradeTokenSymbol} after FOR → BUY`)
+              }
             }
+          }
+
+          // Apply correction if description contradicts parsed direction
+          if (descriptionImpliesSell && isBuy && !isSell) {
+            console.log(`Direction correction: description implies SELL but parsed as BUY, swapping tokenIn/tokenOut for ${tokenInSymbol} -> ${tokenOutSymbol}`)
+            const temp = { ...tokenIn }
+            tokenIn = { ...tokenOut }
+            tokenOut = temp
+            directionCorrected = true
+          } else if (descriptionImpliesBuy && isSell && !isBuy) {
+            console.log(`Direction correction: description implies BUY but parsed as SELL, swapping tokenIn/tokenOut for ${tokenInSymbol} -> ${tokenOutSymbol}`)
+            const temp = { ...tokenIn }
+            tokenIn = { ...tokenOut }
+            tokenOut = temp
+            directionCorrected = true
           }
 
           // Recalculate isBuy/isSell after potential correction
@@ -1774,22 +1843,29 @@ export default function Home() {
   })
 
   // Helper to get USD value for a trade
-  // ALWAYS calculate from entry_price * quantity to bypass any corrupt stored data
   const getTradeUsdValue = (trade: Trade): number => {
-    // Calculate the correct value: price per token × number of tokens = USD spent/received
-    const calculatedValue = trade.entry_price * trade.quantity
-
-    // If calculated value seems reasonable (> 0), use it
-    if (calculatedValue > 0) {
-      return calculatedValue
-    }
-
-    // Fallback to stored total_value_usd if available
+    // PRIORITY 1: Use stored total_value_usd if available (most accurate)
     if (trade.total_value_usd != null && trade.total_value_usd > 0) {
       return trade.total_value_usd
     }
 
-    // Last resort: use stored total_value
+    // PRIORITY 2: For stablecoin base trades, entry_price * quantity = USD value
+    const baseCurrency = ((trade as any).base_currency || '').toUpperCase()
+    const stablecoins = ['USDC', 'USDT', 'DAI', 'BUSD', 'UST', 'FRAX', 'TUSD', 'USDP', 'GUSD', 'LUSD', 'MIM', 'DOLA', 'CRVUSD', 'PYUSD']
+    if (stablecoins.includes(baseCurrency)) {
+      const calculatedValue = trade.entry_price * trade.quantity
+      if (calculatedValue > 0) return calculatedValue
+    }
+
+    // PRIORITY 3: For SOL/WETH base trades, convert using stored base_currency_usd_price
+    const baseCurrencyUsdPrice = (trade as any).base_currency_usd_price
+    if (baseCurrencyUsdPrice && baseCurrencyUsdPrice > 0) {
+      // total_value is in base currency (SOL), multiply by USD price
+      const usdValue = trade.total_value * baseCurrencyUsdPrice
+      if (usdValue > 0) return usdValue
+    }
+
+    // PRIORITY 4: Fallback to total_value (might be wrong for non-USD bases)
     return trade.total_value
   }
 
