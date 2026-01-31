@@ -472,9 +472,9 @@ export default function Home() {
       for (const wallet of wallets) {
         if (wallet.chain !== 'solana') continue
 
-        // Fetch recent transactions (up to 500 for better coverage)
+        // Fetch recent transactions
         const response = await fetch(
-          `https://api.helius.xyz/v0/addresses/${wallet.address}/transactions?api-key=${apiKey}&limit=500`
+          `https://api.helius.xyz/v0/addresses/${wallet.address}/transactions?api-key=${apiKey}&limit=100`
         )
 
         if (!response.ok) {
@@ -1071,6 +1071,12 @@ export default function Home() {
               }
               continue
             }
+          }
+
+          // Check if this signature was already processed (prevents duplicates from same tx)
+          if (txSignature && existingSignatures.has(txSignature)) {
+            console.log(`  SKIPPED: already processed signature ${txSignature.slice(0, 8)}...`)
+            continue
           }
 
           // Fallback duplicate check by key for older trades without signatures
@@ -2367,8 +2373,8 @@ export default function Home() {
                       <div className="space-y-2">
                         {[...pos.buys, ...pos.sells]
                           .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
-                          .map((trade) => (
-                            <div key={trade.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                          .map((trade, idx) => (
+                            <div key={`${trade.id}-${idx}`} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                               <div className="flex items-center gap-2">
                                 <span className={`text-[10px] font-medium flex items-center gap-0.5 ${
                                   trade.direction === 'buy' ? 'text-green-500' : 'text-red-500'
@@ -2680,8 +2686,8 @@ export default function Home() {
                                 <tbody className="divide-y divide-border/50">
                                   {[...pos.buys, ...pos.sells]
                                     .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
-                                    .map((trade) => (
-                                      <tr key={trade.id} className="group hover:bg-muted/50 h-7">
+                                    .map((trade, idx) => (
+                                      <tr key={`${trade.id}-${idx}`} className="group hover:bg-muted/50 h-7">
                                         <td className="py-1">
                                           <span className={`text-[10px] font-medium flex items-center gap-0.5 ${
                                             trade.direction === 'buy' ? 'text-green-500' : 'text-red-500'
