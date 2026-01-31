@@ -295,6 +295,37 @@ export default function Home() {
     }
   }
 
+  const fullResync = async () => {
+    if (!confirm('This will DELETE all trades and re-sync from scratch. Journal entries will be lost. Are you sure?')) return
+
+    try {
+      setSyncing(true)
+
+      // Delete all existing trades
+      const existingTrades = await db.getTrades()
+      for (const trade of existingTrades) {
+        await db.deleteTrade(trade.id)
+      }
+      console.log(`Deleted ${existingTrades.length} existing trades`)
+
+      // Clear local state
+      setTrades([])
+
+      // Wait a moment then trigger fresh sync
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Now sync - this will fetch fresh from Helius
+      await syncNewTrades()
+
+      alert('Full re-sync complete! All trades have been re-imported with corrected data.')
+    } catch (error) {
+      console.error('Full re-sync failed:', error)
+      alert('Failed to re-sync: ' + error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const recalculateUsdValues = async () => {
     if (!confirm('This will recalculate USD values for all trades using current SOL price. Your journal entries will be preserved. Continue?')) return
 
@@ -441,9 +472,9 @@ export default function Home() {
       for (const wallet of wallets) {
         if (wallet.chain !== 'solana') continue
 
-        // Fetch recent transactions (last 100)
+        // Fetch recent transactions (up to 500 for better coverage)
         const response = await fetch(
-          `https://api.helius.xyz/v0/addresses/${wallet.address}/transactions?api-key=${apiKey}&limit=100`
+          `https://api.helius.xyz/v0/addresses/${wallet.address}/transactions?api-key=${apiKey}&limit=500`
         )
 
         if (!response.ok) {
@@ -891,8 +922,11 @@ export default function Home() {
           const isSell = !tokenInIsBase && tokenOutIsBase
 
           // LORIA debug
-          if (tokenInSymbol.includes('LORIA') || tokenOutSymbol.includes('LORIA')) {
+          const isLORIASwap = tokenInSymbol.includes('LORIA') || tokenOutSymbol.includes('LORIA')
+          if (isLORIASwap) {
             console.log('=== LORIA DIRECTION DEBUG ===')
+            console.log('tx.signature:', tx.signature)
+            console.log('tx.description:', tx.description)
             console.log('tokenIn:', tokenIn.symbol, tokenIn.amount)
             console.log('tokenOut:', tokenOut.symbol, tokenOut.amount)
             console.log('tokenInIsBase:', tokenInIsBase, 'tokenOutIsBase:', tokenOutIsBase)
@@ -966,6 +1000,14 @@ export default function Home() {
             console.log(`After correction: isBuy=${finalIsBuy}, isSell=${finalIsSell}`)
           }
 
+          // LORIA: log final decision
+          if (isLORIASwap) {
+            console.log('LORIA descriptionImpliesSell:', descriptionImpliesSell)
+            console.log('LORIA descriptionImpliesBuy:', descriptionImpliesBuy)
+            console.log('LORIA directionCorrected:', directionCorrected)
+            console.log('LORIA finalIsBuy:', finalIsBuy, 'finalIsSell:', finalIsSell)
+          }
+
           if (!finalIsBuy && !finalIsSell) {
             console.log(`Skipping non-buy/sell: ${tokenIn.symbol} -> ${tokenOut.symbol}`)
             continue
@@ -989,6 +1031,11 @@ export default function Home() {
           if (quantity < 0.01 || totalValue < 0.01) {
             console.log(`Skipping low-value transaction: qty=${quantity}, value=${totalValue}`)
             continue
+          }
+
+          // LORIA: log what we're adding
+          if (isLORIASwap) {
+            console.log(`LORIA FINAL: Adding ${finalIsBuy ? 'BUY' : 'SELL'} trade`)
           }
 
           console.log(`Processing: ${finalIsBuy ? 'BUY' : 'SELL'} ${tradeToken.symbol}, qty: ${quantity}, price: ${price}, value: ${totalValue}, date: ${tradeDateTime}`)
@@ -2127,6 +2174,14 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
+          <button
+            onClick={fullResync}
+            disabled={syncing}
+            className="text-[10px] text-red-500 hover:text-red-400 transition-colors disabled:opacity-50"
+            title="Delete all trades and re-sync from scratch"
+          >
+            Reset
+          </button>
           <button
             onClick={removeDuplicates}
             className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
