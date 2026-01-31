@@ -299,30 +299,59 @@ export default function Home() {
     if (!confirm('This will DELETE all trades and re-sync from scratch. Journal entries will be lost. Are you sure?')) return
 
     try {
-      setSyncing(true)
+      // Stop automatic sync to prevent race conditions
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current)
+        syncIntervalRef.current = null
+      }
+
+      // Wait for any ongoing sync to finish
+      while (syncing) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
 
       // Delete all existing trades
       const existingTrades = await db.getTrades()
+      console.log(`Deleting ${existingTrades.length} existing trades...`)
+
       for (const trade of existingTrades) {
-        await db.deleteTrade(trade.id)
+        try {
+          await db.deleteTrade(trade.id)
+        } catch (e) {
+          console.log(`Failed to delete trade ${trade.id}:`, e)
+        }
       }
-      console.log(`Deleted ${existingTrades.length} existing trades`)
+
+      // Verify all deleted
+      const remainingTrades = await db.getTrades()
+      console.log(`Remaining trades after delete: ${remainingTrades.length}`)
 
       // Clear local state
       setTrades([])
 
-      // Wait a moment then trigger fresh sync
+      // Wait for state to settle
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      // Now sync - this will fetch fresh from Helius
+      // Now do a fresh sync
+      console.log('Starting fresh sync...')
       await syncNewTrades()
 
-      alert('Full re-sync complete! All trades have been re-imported with corrected data.')
+      // Restart automatic sync
+      syncIntervalRef.current = setInterval(() => {
+        syncNewTrades()
+      }, 60 * 1000)
+
+      alert('Full re-sync complete! All trades have been re-imported.')
     } catch (error) {
       console.error('Full re-sync failed:', error)
       alert('Failed to re-sync: ' + error)
-    } finally {
-      setSyncing(false)
+
+      // Restart auto-sync even on error
+      if (!syncIntervalRef.current) {
+        syncIntervalRef.current = setInterval(() => {
+          syncNewTrades()
+        }, 60 * 1000)
+      }
     }
   }
 
@@ -450,6 +479,9 @@ export default function Home() {
       const baseCurrencies = ['SOL', 'USDC', 'USDT', 'PYUSD', 'DAI', 'USD1']
       const stablecoins = ['USDC', 'USDT', 'PYUSD', 'DAI', 'USD1']
 
+      // Track signatures processed in THIS sync batch to prevent duplicates
+      const processedInBatch = new Set<string>()
+
       // Fetch current SOL price for USD conversion
       let solUsdPrice = 100 // Default fallback
       try {
@@ -510,6 +542,11 @@ export default function Home() {
         }
 
         for (const tx of data) {
+          // Skip if we've already processed this signature in this batch
+          if (tx.signature && processedInBatch.has(tx.signature)) {
+            continue
+          }
+
           // Check if this is the trophy tomato transaction
           const isGSD = JSON.stringify(tx).includes(searchMint)
           // Check if this involves LORIA
@@ -525,6 +562,11 @@ export default function Home() {
             console.log('LORIA signature:', tx.signature)
             console.log('LORIA events.swap:', JSON.stringify(tx.events?.swap, null, 2))
             console.log('LORIA tokenTransfers:', JSON.stringify(tx.tokenTransfers, null, 2))
+          }
+
+          // Mark this signature as processed
+          if (tx.signature) {
+            processedInBatch.add(tx.signature)
           }
 
           // Check for SWAP or TRANSFER type (some DEX trades come as TRANSFER)
@@ -2063,6 +2105,22 @@ export default function Home() {
 
   const totalBuysUsd = positions.reduce((sum, p) => sum + p.totalInvestedUsd, 0)
   const totalSellsUsd = positions.reduce((sum, p) => sum + p.totalReturnedUsd, 0)
+
+  // Debug P&L calculation
+  console.log('=== P&L DEBUG ===')
+  console.log('totalBuysUsd:', totalBuysUsd.toFixed(2))
+  console.log('totalSellsUsd:', totalSellsUsd.toFixed(2))
+  console.log('totalRealizedPnl:', totalRealizedPnl.toFixed(2))
+  console.log('totalUnrealizedValue:', totalUnrealizedValue.toFixed(2))
+  console.log('totalOpenCostBasis:', totalOpenCostBasis.toFixed(2))
+  console.log('totalUnrealizedPnl:', totalUnrealizedPnl.toFixed(2))
+
+  // Show top 5 positions by invested amount
+  const topPositions = [...positions].sort((a, b) => b.totalInvestedUsd - a.totalInvestedUsd).slice(0, 5)
+  console.log('Top 5 positions by invested:')
+  topPositions.forEach(p => {
+    console.log(`  ${p.symbol}: invested=${p.totalInvestedUsd.toFixed(2)}, returned=${p.totalReturnedUsd.toFixed(2)}, buys=${p.buys.length}, sells=${p.sells.length}`)
+  })
 
   // Portfolio P&L: when initial capital and wallet balance are set, use them for accurate P&L
   // P&L = (wallet_balance + open_position_value) - initial_capital
