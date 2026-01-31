@@ -467,11 +467,11 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-7xl mx-auto">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Analytics</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-2xl md:text-3xl font-bold">Analytics</h1>
+        <p className="text-sm md:text-base text-muted-foreground">
           Deep dive into your trading performance
         </p>
       </div>
@@ -489,62 +489,62 @@ export default function AnalyticsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-2 md:gap-4">
               {/* Bitcoin */}
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between p-2 md:p-3 rounded-lg bg-muted/50">
                 <div>
-                  <div className="text-sm font-medium">BTC</div>
-                  <div className="text-lg font-bold">
+                  <div className="text-xs md:text-sm font-medium">BTC</div>
+                  <div className="text-sm md:text-lg font-bold">
                     ${marketSentiment.btc.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <div className={`flex items-center gap-1 text-sm font-medium ${
+                <div className={`flex items-center gap-1 text-xs md:text-sm font-medium ${
                   marketSentiment.btc.change24h >= 0 ? 'text-green-500' : 'text-red-500'
                 }`}>
                   {marketSentiment.btc.change24h >= 0 ? (
-                    <TrendingUp className="h-4 w-4" />
+                    <TrendingUp className="h-3 w-3 md:h-4 md:w-4" />
                   ) : (
-                    <TrendingDown className="h-4 w-4" />
+                    <TrendingDown className="h-3 w-3 md:h-4 md:w-4" />
                   )}
                   {marketSentiment.btc.change24h >= 0 ? '+' : ''}{marketSentiment.btc.change24h.toFixed(1)}%
                 </div>
               </div>
 
               {/* Solana */}
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between p-2 md:p-3 rounded-lg bg-muted/50">
                 <div>
-                  <div className="text-sm font-medium">SOL</div>
-                  <div className="text-lg font-bold">
-                    ${marketSentiment.sol.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  <div className="text-xs md:text-sm font-medium">SOL</div>
+                  <div className="text-sm md:text-lg font-bold">
+                    ${marketSentiment.sol.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <div className={`flex items-center gap-1 text-sm font-medium ${
+                <div className={`flex items-center gap-1 text-xs md:text-sm font-medium ${
                   marketSentiment.sol.change24h >= 0 ? 'text-green-500' : 'text-red-500'
                 }`}>
                   {marketSentiment.sol.change24h >= 0 ? (
-                    <TrendingUp className="h-4 w-4" />
+                    <TrendingUp className="h-3 w-3 md:h-4 md:w-4" />
                   ) : (
-                    <TrendingDown className="h-4 w-4" />
+                    <TrendingDown className="h-3 w-3 md:h-4 md:w-4" />
                   )}
                   {marketSentiment.sol.change24h >= 0 ? '+' : ''}{marketSentiment.sol.change24h.toFixed(1)}%
                 </div>
               </div>
 
               {/* Ethereum */}
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between p-2 md:p-3 rounded-lg bg-muted/50">
                 <div>
-                  <div className="text-sm font-medium">ETH</div>
-                  <div className="text-lg font-bold">
+                  <div className="text-xs md:text-sm font-medium">ETH</div>
+                  <div className="text-sm md:text-lg font-bold">
                     ${marketSentiment.eth.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <div className={`flex items-center gap-1 text-sm font-medium ${
+                <div className={`flex items-center gap-1 text-xs md:text-sm font-medium ${
                   marketSentiment.eth.change24h >= 0 ? 'text-green-500' : 'text-red-500'
                 }`}>
                   {marketSentiment.eth.change24h >= 0 ? (
-                    <TrendingUp className="h-4 w-4" />
+                    <TrendingUp className="h-3 w-3 md:h-4 md:w-4" />
                   ) : (
-                    <TrendingDown className="h-4 w-4" />
+                    <TrendingDown className="h-3 w-3 md:h-4 md:w-4" />
                   )}
                   {marketSentiment.eth.change24h >= 0 ? '+' : ''}{marketSentiment.eth.change24h.toFixed(1)}%
                 </div>

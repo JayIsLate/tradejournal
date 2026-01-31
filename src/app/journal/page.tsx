@@ -410,8 +410,8 @@ export default function JournalPage() {
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Header */}
-      <div className="border-b px-6 py-4">
-        <div className="flex items-baseline gap-4 mb-4">
+      <div className="border-b px-4 md:px-6 py-3 md:py-4">
+        <div className="flex items-baseline gap-3 md:gap-4 mb-3 md:mb-4">
           <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-4 w-4" />
           </Link>

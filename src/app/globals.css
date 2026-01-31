@@ -121,3 +121,39 @@ input[type="range"]::-moz-range-thumb {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Only show Electron-specific elements when running in Electron */
+.electron-only {
+  display: none;
+}
+
+/* Safe area insets for iPhone notch/home indicator */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+/* Mobile-specific adjustments */
+@media (max-width: 768px) {
+  html {
+    font-size: 100%; /* Slightly smaller on mobile */
+  }
+
+  /* Prevent horizontal overflow */
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Better touch targets */
+  button, a {
+    min-height: 44px;
+  }
+
+  /* Adjust padding for mobile */
+  .p-6 {
+    padding: 1rem;
+  }
+}

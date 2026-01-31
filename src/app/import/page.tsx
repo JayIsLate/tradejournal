@@ -1290,11 +1290,11 @@ BONK,Bonk,Solana,buy,0.00001,0.000025,100000000,2024-01-10,2024-01-15,Raydium,cl
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4 md:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Import Trades</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-2xl md:text-3xl font-bold">Import Trades</h1>
+        <p className="text-sm md:text-base text-muted-foreground">
           Import trades from CSV or directly from your wallet
         </p>
       </div>

@@ -1997,58 +1997,60 @@ export default function Home() {
       </div>
 
       {/* Analytics Bar */}
-      <div className="border-b px-4 py-2 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-6">
-          <div>
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">P&L (USD)</div>
-            <div className={`text-sm font-medium tabular-nums ${getPnlColor(totalPnlUsd)}`}>
-              {formatCurrency(totalPnlUsd)}
-            </div>
-          </div>
-          <div className="h-6 w-px bg-border" />
-          <div>
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Win Rate</div>
-            <div className="text-sm font-medium tabular-nums">{winRate.toFixed(0)}%</div>
-          </div>
-          <div className="h-6 w-px bg-border" />
-          <div>
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Open</div>
-            <div className="text-sm font-medium tabular-nums">{openCount}</div>
-          </div>
-          <div className="h-6 w-px bg-border" />
-          <div>
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
-              {hasPortfolioSettings ? 'Initial Capital' : 'Deployed (USD)'}
-            </div>
-            <div className="text-sm font-medium tabular-nums">{formatCurrency(totalInvestedUsd)}</div>
-          </div>
-          {hasPortfolioSettings && (
-            <>
-              <div className="h-6 w-px bg-border" />
-              <div>
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Wallet</div>
-                <div className="text-sm font-medium tabular-nums">{formatCurrency(walletBalance)}</div>
+      <div className="border-b px-4 py-2 text-xs">
+        {/* Mobile: Scrollable row */}
+        <div className="flex items-center gap-4 overflow-x-auto pb-2 md:pb-0 md:justify-between">
+          <div className="flex items-center gap-4 md:gap-6 flex-shrink-0">
+            <div className="flex-shrink-0">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">P&L</div>
+              <div className={`text-sm font-medium tabular-nums ${getPnlColor(totalPnlUsd)}`}>
+                {formatCurrency(totalPnlUsd)}
               </div>
-            </>
-          )}
-          <div className="h-6 w-px bg-border" />
-          <div>
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Open Value</div>
-            <div className="text-sm font-medium tabular-nums">{formatCurrency(totalReturnedUsd)}</div>
-          </div>
-          {totalInvestedUsd > 0 && (totalReturnedUsd > 0 || totalUnrealizedValue > 0) && (
-            <>
-              <div className="h-6 w-px bg-border" />
-              <div>
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">P&L %</div>
-                <div className={`text-sm font-medium tabular-nums ${getPnlColor(totalPnlPercent)}`}>
-                  {totalPnlPercent >= 0 ? '+' : ''}{totalPnlPercent.toFixed(1)}%
+            </div>
+            <div className="h-6 w-px bg-border hidden md:block" />
+            <div className="flex-shrink-0">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Win%</div>
+              <div className="text-sm font-medium tabular-nums">{winRate.toFixed(0)}%</div>
+            </div>
+            <div className="h-6 w-px bg-border hidden md:block" />
+            <div className="flex-shrink-0">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Open</div>
+              <div className="text-sm font-medium tabular-nums">{openCount}</div>
+            </div>
+            <div className="h-6 w-px bg-border hidden md:block" />
+            <div className="flex-shrink-0">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                {hasPortfolioSettings ? 'Capital' : 'Deployed'}
+              </div>
+              <div className="text-sm font-medium tabular-nums">{formatCurrency(totalInvestedUsd)}</div>
+            </div>
+            {hasPortfolioSettings && (
+              <>
+                <div className="h-6 w-px bg-border hidden md:block" />
+                <div className="flex-shrink-0">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Wallet</div>
+                  <div className="text-sm font-medium tabular-nums">{formatCurrency(walletBalance)}</div>
                 </div>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
+              </>
+            )}
+            <div className="h-6 w-px bg-border hidden md:block" />
+            <div className="flex-shrink-0">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Value</div>
+              <div className="text-sm font-medium tabular-nums">{formatCurrency(totalReturnedUsd)}</div>
+            </div>
+            {totalInvestedUsd > 0 && (totalReturnedUsd > 0 || totalUnrealizedValue > 0) && (
+              <>
+                <div className="h-6 w-px bg-border hidden md:block" />
+                <div className="flex-shrink-0">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">P&L %</div>
+                  <div className={`text-sm font-medium tabular-nums ${getPnlColor(totalPnlPercent)}`}>
+                    {totalPnlPercent >= 0 ? '+' : ''}{totalPnlPercent.toFixed(1)}%
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
           <button
             onClick={removeDuplicates}
             className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
@@ -2077,23 +2079,25 @@ export default function Home() {
             {syncing ? 'Syncing...' : newTradesCount > 0 ? `+${newTradesCount} new` : 'Sync'}
           </button>
           {lastPriceUpdate && (
-            <div className="text-[9px] text-muted-foreground">
-              Prices: {lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <div className="text-[9px] text-muted-foreground hidden md:block">
+              {lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-          <Input
-            placeholder="Search..."
-            className="pl-7 w-40 h-7 text-xs bg-muted border-0"
-            onChange={(e) => handleSearch(e.target.value)}
-          />
-        </div>
+          <div className="relative hidden md:block">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <Input
+              placeholder="Search..."
+              className="pl-7 w-40 h-7 text-xs bg-muted border-0"
+              onChange={(e) => handleSearch(e.target.value)}
+            />
+          </div>
+          </div>
         </div>
       </div>
 
-      {/* Spreadsheet */}
+      {/* Spreadsheet - horizontally scrollable on mobile */}
       <div className="flex-1 overflow-auto">
+        <div className="min-w-[800px] md:min-w-0">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-background border-b">
             <tr className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -2449,6 +2453,7 @@ export default function Home() {
             })}
           </tbody>
         </table>
+        </div>
 
         {positions.length === 0 && searchQuery && (
           <div className="text-center py-12 text-sm text-muted-foreground">
