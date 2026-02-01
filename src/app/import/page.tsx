@@ -102,6 +102,7 @@ export default function ImportPage() {
   // Portfolio settings
   const [initialCapital, setInitialCapital] = useState('')
   const [walletBalance, setWalletBalance] = useState('')
+  const [totalPortfolioValue, setTotalPortfolioValue] = useState('')
   const [portfolioSaved, setPortfolioSaved] = useState(false)
 
   const requiredFields = ['token_symbol', 'entry_price', 'quantity', 'entry_date']
@@ -119,6 +120,9 @@ export default function ImportPage() {
 
       const savedBalance = await db.getSetting('wallet_balance')
       if (savedBalance) setWalletBalance(savedBalance)
+
+      const savedTotalValue = await db.getSetting('total_portfolio_value')
+      if (savedTotalValue) setTotalPortfolioValue(savedTotalValue)
 
       const savedWalletsJson = await db.getSetting('watched_wallets')
       if (savedWalletsJson) {
@@ -142,6 +146,11 @@ export default function ImportPage() {
     }
     if (walletBalance) {
       await db.setSetting('wallet_balance', walletBalance)
+    }
+    if (totalPortfolioValue) {
+      await db.setSetting('total_portfolio_value', totalPortfolioValue)
+    } else {
+      await db.setSetting('total_portfolio_value', '') // Clear if empty
     }
     setPortfolioSaved(true)
     setTimeout(() => setPortfolioSaved(false), 2000)
@@ -1307,8 +1316,7 @@ BONK,Bonk,Solana,buy,0.00001,0.000025,100000000,2024-01-10,2024-01-15,Raydium,cl
             Portfolio Settings
           </CardTitle>
           <CardDescription>
-            Set your initial deposit and current wallet balance for accurate P&L tracking.
-            P&L = (Wallet Balance + Open Position Value) - Initial Capital
+            Enter values from your Fomo app for accurate P&L. The easiest method is to enter your Total Portfolio Value directly.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1319,28 +1327,31 @@ BONK,Bonk,Solana,buy,0.00001,0.000025,100000000,2024-01-10,2024-01-15,Raydium,cl
                 id="initial-capital"
                 type="number"
                 step="0.01"
-                placeholder="e.g. 1200.00"
+                placeholder="e.g. 1076.81"
                 value={initialCapital}
                 onChange={(e) => setInitialCapital(e.target.value)}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Total amount deposited into your trading wallet
+                How much you originally deposited (Total - P&L from Fomo)
               </p>
             </div>
             <div>
-              <Label htmlFor="wallet-balance">Current Wallet Balance (USD)</Label>
+              <Label htmlFor="total-portfolio">Total Portfolio Value (USD)</Label>
               <Input
-                id="wallet-balance"
+                id="total-portfolio"
                 type="number"
                 step="0.01"
-                placeholder="e.g. 931.00"
-                value={walletBalance}
-                onChange={(e) => setWalletBalance(e.target.value)}
+                placeholder="e.g. 2004.01"
+                value={totalPortfolioValue}
+                onChange={(e) => setTotalPortfolioValue(e.target.value)}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Cash/SOL balance not currently in token positions
+                Your total value from Fomo app (overrides calculated positions)
               </p>
             </div>
+          </div>
+          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+            <strong>Quick setup:</strong> From Fomo, enter your Total (e.g. $2,004.01) above, then calculate Initial Capital = Total - P&L (e.g. $2,004.01 - $927.20 = $1,076.81)
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={savePortfolioSettings}>

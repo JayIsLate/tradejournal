@@ -40,6 +40,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
+// Shared constant for stablecoins - used throughout for USD conversion
+const STABLECOINS = ['USDC', 'USDT', 'PYUSD', 'DAI', 'BUSD', 'TUSD', 'FRAX', 'USD1', 'USDbC', 'USDP', 'GUSD', 'LUSD', 'MIM', 'DOLA', 'CRVUSD', 'UST']
+const BASE_CURRENCIES = ['SOL', ...STABLECOINS]
+
 interface TokenPosition {
   symbol: string
   name: string | null
@@ -116,6 +120,7 @@ export default function Home() {
   // Portfolio settings
   const [initialCapital, setInitialCapital] = useState<number | null>(null)
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
+  const [totalPortfolioValue, setTotalPortfolioValue] = useState<number | null>(null)
 
   // Sync
   const [syncing, setSyncing] = useState(false)
@@ -229,15 +234,17 @@ export default function Home() {
 
   const loadData = async () => {
     try {
-      const [tradesData, tagsData, savedCapital, savedBalance] = await Promise.all([
+      const [tradesData, tagsData, savedCapital, savedBalance, savedTotalValue] = await Promise.all([
         db.getTrades(),
         db.getTags(),
         db.getSetting('initial_capital'),
         db.getSetting('wallet_balance'),
+        db.getSetting('total_portfolio_value'),
       ])
 
       if (savedCapital) setInitialCapital(parseFloat(savedCapital))
       if (savedBalance) setWalletBalance(parseFloat(savedBalance))
+      if (savedTotalValue) setTotalPortfolioValue(parseFloat(savedTotalValue))
 
       // Debug: Log ALL trades to understand the corrupt data
       console.log('%c=== TRADE DATA DEBUG ===', 'background: red; color: white; font-size: 16px')
@@ -299,16 +306,14 @@ export default function Home() {
     if (!confirm('This will DELETE all trades and re-sync from scratch. Journal entries will be lost. Are you sure?')) return
 
     try {
-      // Stop automatic sync to prevent race conditions
+      // Stop automatic sync immediately
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current)
         syncIntervalRef.current = null
       }
 
-      // Wait for any ongoing sync to finish
-      while (syncing) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-      }
+      // Force stop syncing state - don't wait
+      setSyncing(false)
 
       // Delete all existing trades
       const existingTrades = await db.getTrades()
@@ -356,7 +361,7 @@ export default function Home() {
   }
 
   const recalculateUsdValues = async () => {
-    if (!confirm('This will recalculate USD values for all trades using current SOL price. Your journal entries will be preserved. Continue?')) return
+    if (!confirm('This will recalculate USD values for all trades. Your journal entries will be preserved. Continue?')) return
 
     console.log('=== FIX USD STARTED ===')
 
@@ -381,43 +386,48 @@ export default function Home() {
       let totalBefore = 0
       let totalAfter = 0
 
-      const stablecoins = ['USDC', 'USDT', 'DAI', 'BUSD', 'UST', 'FRAX', 'TUSD', 'USDP', 'GUSD', 'LUSD']
-
       for (const trade of allTrades) {
-        const existingBaseCurrency = ((trade as any).base_currency || '').toUpperCase()
-        const existingTotalValueUsd = trade.total_value_usd
+        const existingBaseCurrency = (trade.base_currency || '').toUpperCase()
+        const existingUsdPrice = trade.base_currency_usd_price || 0
+        const existingTotalValueUsd = trade.total_value_usd || 0
 
         totalBefore += existingTotalValueUsd || trade.total_value
 
-        // For Solana trades, ALWAYS recalculate based on total_value size
-        // Small values (< 10) are likely SOL amounts, larger values are likely already USD
         let baseCurrency: string
         let baseCurrencyUsdPrice: number
         let totalValueUsd: number
 
-        if (trade.token_chain === 'Solana' || trade.token_chain === 'solana') {
-          // Solana chain - determine if SOL or stablecoin based
-          if (trade.total_value < 10) {
-            // Small value = likely SOL (e.g., 0.25 SOL)
-            baseCurrency = 'SOL'
-            baseCurrencyUsdPrice = currentSolPrice
-            totalValueUsd = trade.total_value * currentSolPrice
-          } else if (trade.total_value < 500) {
-            // Medium value = could be either, but likely already USD from stablecoin trade
-            baseCurrency = 'USDC'
+        // TRUST the existing base_currency if it's set and valid
+        if (existingBaseCurrency && (STABLECOINS.includes(existingBaseCurrency) || existingBaseCurrency === 'SOL')) {
+          baseCurrency = existingBaseCurrency
+          if (STABLECOINS.includes(existingBaseCurrency)) {
+            // Stablecoin - value IS USD
             baseCurrencyUsdPrice = 1
             totalValueUsd = trade.total_value
           } else {
-            // Large value = definitely already USD
+            // SOL - multiply by current price
+            baseCurrencyUsdPrice = currentSolPrice
+            totalValueUsd = trade.total_value * currentSolPrice
+          }
+        } else {
+          // No valid base_currency - use heuristics as fallback
+          // For Solana chain, most small trades are SOL-based
+          if ((trade.token_chain === 'Solana' || trade.token_chain === 'solana') && trade.total_value < 50) {
+            baseCurrency = 'SOL'
+            baseCurrencyUsdPrice = currentSolPrice
+            totalValueUsd = trade.total_value * currentSolPrice
+          } else {
+            // Assume stablecoin for larger values or unknown
             baseCurrency = 'USDC'
             baseCurrencyUsdPrice = 1
             totalValueUsd = trade.total_value
           }
-        } else {
-          // Non-Solana (Base, Ethereum) - keep existing or default
-          baseCurrency = existingBaseCurrency || 'USDC'
-          baseCurrencyUsdPrice = stablecoins.includes(baseCurrency) ? 1 : currentSolPrice
-          totalValueUsd = stablecoins.includes(baseCurrency) ? trade.total_value : trade.total_value * baseCurrencyUsdPrice
+        }
+
+        // Log problem tokens
+        const debugTokens = ['GSD', 'LORIA']
+        if (debugTokens.includes(trade.token_symbol.toUpperCase())) {
+          console.log(`FIX USD [${trade.token_symbol}]: total_value=${trade.total_value.toFixed(4)}, old_base=${existingBaseCurrency}, new_base=${baseCurrency}, old_usd=${existingTotalValueUsd.toFixed(2)}, new_usd=${totalValueUsd.toFixed(2)}`)
         }
 
         totalAfter += totalValueUsd
@@ -431,8 +441,17 @@ export default function Home() {
         updatedCount++
       }
 
-      // Reload trades
+      // Reload trades from database
       const updatedTrades = await db.getTrades()
+      console.log(`Loaded ${updatedTrades.length} updated trades`)
+
+      // Debug: show first few GSD trades after reload
+      const gsdTrades = updatedTrades.filter(t => t.token_symbol.toUpperCase() === 'GSD')
+      console.log(`GSD trades after reload: ${gsdTrades.length}`)
+      gsdTrades.slice(0, 3).forEach(t => {
+        console.log(`  GSD: total_value=${t.total_value}, total_value_usd=${t.total_value_usd}, base=${t.base_currency}`)
+      })
+
       setTrades(updatedTrades)
 
       console.log(`Fixed USD values: Before=$${totalBefore.toFixed(2)}, After=$${totalAfter.toFixed(2)}`)
@@ -476,15 +495,19 @@ export default function Home() {
       const existingSignatures = new Set(
         existingTrades.map(t => (t as any).tx_signature).filter(Boolean)
       )
-      // Fallback key for older trades without signatures
+      // Fallback key for older trades without signatures - use uppercase symbol and contract for uniqueness
       const existingKeys = new Set(
-        existingTrades.map(t => `${t.token_symbol}-${t.direction}-${t.entry_date}-${t.quantity.toFixed(4)}`)
+        existingTrades.map(t => {
+          const symbol = t.token_symbol.toUpperCase()
+          const contract = t.token_contract_address?.toLowerCase() || ''
+          return `${symbol}-${contract}-${t.direction}-${t.entry_date.split('T')[0]}-${t.quantity.toFixed(2)}`
+        })
       )
+
+      console.log(`Existing trades: ${existingTrades.length}, signatures: ${existingSignatures.size}, keys: ${existingKeys.size}`)
 
       const newTrades: Trade[] = []
       let correctedCount = 0
-      const baseCurrencies = ['SOL', 'USDC', 'USDT', 'PYUSD', 'DAI', 'USD1']
-      const stablecoins = ['USDC', 'USDT', 'PYUSD', 'DAI', 'USD1']
 
       // Track signatures processed in THIS sync batch to prevent duplicates
       const processedInBatch = new Set<string>()
@@ -741,23 +764,33 @@ export default function Home() {
                 if (isLORIA) console.log('LORIA: desc contains sold/sell -> isSellTransaction = true')
               } else if (desc.includes('swapped')) {
                 // Parse "swapped X TOKEN for Y SOL/USDC" pattern
-                // If user swapped the trade token for base currency, it's a SELL
                 const tradeSymbol = mainTradeTransfer?.symbol?.toLowerCase() || ''
                 const swappedIdx = desc.indexOf('swapped')
                 const forIdx = desc.indexOf(' for ')
                 if (swappedIdx !== -1 && forIdx !== -1) {
                   const beforeFor = desc.slice(swappedIdx, forIdx)
                   const afterFor = desc.slice(forIdx)
-                  // If the trade token appears before "for" and base currency after, it's a SELL
-                  if (tradeSymbol && beforeFor.includes(tradeSymbol) &&
-                      (afterFor.includes('sol') || afterFor.includes('usdc') || afterFor.includes('usdt'))) {
+                  const baseSymbols = ['sol', 'usdc', 'usdt', 'weth', 'eth', 'wsol']
+                  const hasBaseBeforeFor = baseSymbols.some(s => beforeFor.includes(s))
+                  const hasBaseAfterFor = baseSymbols.some(s => afterFor.includes(s))
+
+                  // More aggressive: if base is AFTER "for", user received base = SELL
+                  if (hasBaseAfterFor && !hasBaseBeforeFor) {
                     isSellTransaction = true
-                    if (isLORIA) console.log('LORIA: desc pattern "swapped TOKEN for SOL/USDC" -> isSellTransaction = true')
+                    if (isLORIA) console.log('LORIA: desc pattern base only after FOR -> SELL')
+                  } else if (hasBaseBeforeFor && !hasBaseAfterFor) {
+                    isSellTransaction = false
+                    if (isLORIA) console.log('LORIA: desc pattern base only before FOR -> BUY')
+                  } else if (tradeSymbol && beforeFor.includes(tradeSymbol) && hasBaseAfterFor) {
+                    isSellTransaction = true
+                    if (isLORIA) console.log('LORIA: desc pattern "swapped TOKEN for SOL/USDC" -> SELL')
                   } else if (isLORIA) {
                     console.log('LORIA: desc has swapped but pattern not matched')
                     console.log('  tradeSymbol:', tradeSymbol)
                     console.log('  beforeFor:', beforeFor)
                     console.log('  afterFor:', afterFor)
+                    console.log('  hasBaseBeforeFor:', hasBaseBeforeFor)
+                    console.log('  hasBaseAfterFor:', hasBaseAfterFor)
                   }
                 }
               } else if (desc.includes('bought') || desc.includes('buy')) {
@@ -961,8 +994,8 @@ export default function Home() {
             continue
           }
 
-          const tokenInIsBase = baseCurrencies.includes(tokenInSymbol)
-          const tokenOutIsBase = baseCurrencies.includes(tokenOutSymbol)
+          const tokenInIsBase = BASE_CURRENCIES.includes(tokenInSymbol)
+          const tokenOutIsBase = BASE_CURRENCIES.includes(tokenOutSymbol)
 
           if (tokenInIsBase && tokenOutIsBase) continue
           if (tokenIn.symbol === 'SOL' && tokenIn.amount < 0.02) continue // Skip fees
@@ -996,29 +1029,51 @@ export default function Home() {
             descriptionImpliesBuy = true
           } else if (descForValidation.includes('swapped')) {
             // Parse "swapped X TOKEN for Y SOL/USDC" pattern
-            // If the trade token (non-base) appears before "for" and base currency after, it's a SELL
+            // Strategy: Look at what's FIRST after "swapped" and what's LAST after "for"
+            // First token after "swapped" is what user GIVES, last token is what user RECEIVES
             const swappedIdx = descForValidation.indexOf('swapped')
             const forIdx = descForValidation.indexOf(' for ')
             if (swappedIdx !== -1 && forIdx !== -1) {
               const beforeFor = descForValidation.slice(swappedIdx, forIdx).toLowerCase()
               const afterFor = descForValidation.slice(forIdx).toLowerCase()
 
-              // Check which token is mentioned where
+              const baseSymbols = ['sol', 'usdc', 'usdt', 'weth', 'eth', 'wsol']
               const tradeTokenSymbol = (isBuy ? tokenOut.symbol : tokenIn.symbol).toLowerCase()
-              const baseSymbols = ['sol', 'usdc', 'usdt', 'weth', 'eth']
-              const hasTradeTokenBeforeFor = tradeTokenSymbol && beforeFor.includes(tradeTokenSymbol)
-              const hasBaseAfterFor = baseSymbols.some(s => afterFor.includes(s))
-              const hasTradeTokenAfterFor = tradeTokenSymbol && afterFor.includes(tradeTokenSymbol)
-              const hasBaseBeforeFor = baseSymbols.some(s => beforeFor.includes(s))
 
-              if (hasTradeTokenBeforeFor && hasBaseAfterFor) {
+              // Check if base currency appears before or after "for"
+              const hasBaseBeforeFor = baseSymbols.some(s => beforeFor.includes(s))
+              const hasBaseAfterFor = baseSymbols.some(s => afterFor.includes(s))
+              const hasTradeTokenBeforeFor = tradeTokenSymbol && tradeTokenSymbol !== 'unknown' && beforeFor.includes(tradeTokenSymbol)
+              const hasTradeTokenAfterFor = tradeTokenSymbol && tradeTokenSymbol !== 'unknown' && afterFor.includes(tradeTokenSymbol)
+
+              // More aggressive detection: if base is AFTER "for", user received base = SELL
+              // If base is BEFORE "for", user gave base = BUY
+              if (hasBaseAfterFor && !hasBaseBeforeFor) {
+                // Base currency only after "for" = SELL (user receives base)
+                descriptionImpliesSell = true
+                console.log(`Swapped pattern: base only after FOR → SELL (user receives base)`)
+              } else if (hasBaseBeforeFor && !hasBaseAfterFor) {
+                // Base currency only before "for" = BUY (user gives base)
+                descriptionImpliesBuy = true
+                console.log(`Swapped pattern: base only before FOR → BUY (user gives base)`)
+              } else if (hasTradeTokenBeforeFor && hasBaseAfterFor) {
                 // "swapped TOKEN for SOL" = SELL
                 descriptionImpliesSell = true
-                console.log(`Swapped pattern detected: ${tradeTokenSymbol} before FOR, base after FOR → SELL`)
+                console.log(`Swapped pattern: ${tradeTokenSymbol} before FOR, base after FOR → SELL`)
               } else if (hasBaseBeforeFor && hasTradeTokenAfterFor) {
                 // "swapped SOL for TOKEN" = BUY
                 descriptionImpliesBuy = true
-                console.log(`Swapped pattern detected: base before FOR, ${tradeTokenSymbol} after FOR → BUY`)
+                console.log(`Swapped pattern: base before FOR, ${tradeTokenSymbol} after FOR → BUY`)
+              }
+
+              if (isLORIASwap) {
+                console.log('LORIA swapped pattern parsing:')
+                console.log('  beforeFor:', beforeFor)
+                console.log('  afterFor:', afterFor)
+                console.log('  hasBaseBeforeFor:', hasBaseBeforeFor)
+                console.log('  hasBaseAfterFor:', hasBaseAfterFor)
+                console.log('  hasTradeTokenBeforeFor:', hasTradeTokenBeforeFor)
+                console.log('  hasTradeTokenAfterFor:', hasTradeTokenAfterFor)
               }
             }
           }
@@ -1042,8 +1097,8 @@ export default function Home() {
           let finalIsBuy = isBuy
           let finalIsSell = isSell
           if (directionCorrected) {
-            const newTokenInIsBase = baseCurrencies.includes(tokenIn.symbol.toUpperCase())
-            const newTokenOutIsBase = baseCurrencies.includes(tokenOut.symbol.toUpperCase())
+            const newTokenInIsBase = BASE_CURRENCIES.includes(tokenIn.symbol.toUpperCase())
+            const newTokenOutIsBase = BASE_CURRENCIES.includes(tokenOut.symbol.toUpperCase())
             finalIsBuy = newTokenInIsBase && !newTokenOutIsBase
             finalIsSell = !newTokenInIsBase && newTokenOutIsBase
             console.log(`After correction: isBuy=${finalIsBuy}, isSell=${finalIsSell}`)
@@ -1096,7 +1151,7 @@ export default function Home() {
               const correctDirection = finalIsBuy ? 'buy' : 'sell'
               // Determine base currency and USD conversion
               const baseCurrencySymbol = baseToken.symbol.toUpperCase()
-              const isStablecoin = stablecoins.includes(baseCurrencySymbol)
+              const isStablecoin = STABLECOINS.includes(baseCurrencySymbol)
               const baseCurrencyUsdPrice = isStablecoin ? 1 : solUsdPrice
               const totalValueUsd = baseToken.amount * baseCurrencyUsdPrice
 
@@ -1130,7 +1185,9 @@ export default function Home() {
 
           // Fallback duplicate check by key for older trades without signatures
           const dateOnly = tradeDateTime.split('T')[0]
-          const key = `${tradeToken.symbol}-${finalIsBuy ? 'buy' : 'sell'}-${dateOnly}-${quantity.toFixed(4)}`
+          const symbolUpper = tradeToken.symbol.toUpperCase()
+          const contractLower = (tradeToken.mint || '').toLowerCase()
+          const key = `${symbolUpper}-${contractLower}-${finalIsBuy ? 'buy' : 'sell'}-${dateOnly}-${quantity.toFixed(2)}`
           if (existingKeys.has(key)) {
             console.log(`  SKIPPED: duplicate key ${key}`)
             continue
@@ -1142,7 +1199,7 @@ export default function Home() {
 
           // Determine base currency and USD conversion
           const baseCurrencySymbol = baseToken.symbol.toUpperCase()
-          const isStablecoin = stablecoins.includes(baseCurrencySymbol)
+          const isStablecoin = STABLECOINS.includes(baseCurrencySymbol)
           const baseCurrencyUsdPrice = isStablecoin ? 1 : solUsdPrice
           const totalValueUsd = baseToken.amount * baseCurrencyUsdPrice
 
@@ -1150,7 +1207,7 @@ export default function Home() {
             id: generateId(),
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            token_symbol: tradeToken.symbol,
+            token_symbol: tradeToken.symbol.toUpperCase(), // Normalize to uppercase
             token_name: tradeToken.name || null,
             token_chain: 'Solana',
             token_contract_address: tradeToken.mint || null,
@@ -1184,9 +1241,9 @@ export default function Home() {
       }
 
       if (newTrades.length > 0) {
-        // Fetch token metadata for unknown tokens
+        // Fetch token metadata for unknown tokens (check both cases since we normalize to uppercase)
         const unknownMints = newTrades
-          .filter(t => t.token_symbol === 'Unknown' && t.token_contract_address)
+          .filter(t => (t.token_symbol === 'Unknown' || t.token_symbol === 'UNKNOWN') && t.token_contract_address)
           .map(t => t.token_contract_address as string)
 
         console.log('New trades:', newTrades.length, 'Unknown mints:', unknownMints.length, unknownMints)
@@ -1247,7 +1304,7 @@ export default function Home() {
 
       // Also update existing Unknown tokens using DexScreener and Helius
       const existingUnknown = existingTrades
-        .filter(t => t.token_symbol === 'Unknown' && t.token_contract_address)
+        .filter(t => (t.token_symbol === 'Unknown' || t.token_symbol === 'UNKNOWN') && t.token_contract_address)
 
       if (existingUnknown.length > 0) {
         const uniqueMints = [...new Set(existingUnknown.map(t => t.token_contract_address as string))]
@@ -1295,7 +1352,7 @@ export default function Home() {
               for (const token of metadata) {
                 const symbol = token.onChainMetadata?.metadata?.data?.symbol
                   || token.legacyMetadata?.symbol
-                if (symbol && symbol !== 'Unknown') {
+                if (symbol && symbol !== 'Unknown' && symbol !== 'UNKNOWN') {
                   const addr = token.account?.toLowerCase()
                   metadataMap[addr] = {
                     symbol,
@@ -1338,6 +1395,58 @@ export default function Home() {
           }
         } catch (e) {
           console.error('Failed to update metadata via DexScreener:', e)
+        }
+      }
+
+      // Fetch images for tokens missing images (even if they have symbols)
+      const tradesWithoutImages = existingTrades.filter(t =>
+        !t.token_image &&
+        t.token_contract_address &&
+        t.token_symbol !== 'Unknown' &&
+        t.token_symbol !== 'UNKNOWN'
+      )
+      if (tradesWithoutImages.length > 0) {
+        const uniqueMints = [...new Set(tradesWithoutImages.map(t => t.token_contract_address as string))]
+        console.log('Fetching images for', uniqueMints.length, 'tokens without images')
+
+        try {
+          const imageMap: Record<string, string> = {}
+
+          // Try DexScreener for images
+          for (let i = 0; i < uniqueMints.length; i += 30) {
+            const batch = uniqueMints.slice(i, i + 30)
+            const addressList = batch.join(',')
+            const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addressList}`)
+            if (response.ok) {
+              const data = await response.json()
+              if (data.pairs) {
+                for (const pair of data.pairs) {
+                  const addr = pair.baseToken?.address?.toLowerCase()
+                  if (addr && pair.info?.imageUrl && !imageMap[addr]) {
+                    imageMap[addr] = pair.info.imageUrl
+                  }
+                }
+              }
+            }
+          }
+
+          // Update trades with images
+          let imageUpdates = 0
+          for (const trade of tradesWithoutImages) {
+            const addr = trade.token_contract_address?.toLowerCase()
+            if (addr && imageMap[addr]) {
+              await db.updateTrade(trade.id, { token_image: imageMap[addr] } as any)
+              imageUpdates++
+            }
+          }
+
+          if (imageUpdates > 0) {
+            console.log('Updated', imageUpdates, 'trades with images')
+            const updatedTrades = await db.getTrades()
+            setTrades(updatedTrades)
+          }
+        } catch (e) {
+          console.error('Failed to fetch images:', e)
         }
       }
 
@@ -1895,7 +2004,6 @@ export default function Home() {
   }
 
   // Filter and group trades
-  const stablecoins = ['USDC', 'USDT', 'PYUSD', 'DAI', 'BUSD', 'TUSD', 'FRAX', 'USD1', 'USDbC']
   // Base/native tokens to filter out (they're currencies, not traded positions)
   const nativeTokens: Record<string, string[]> = {
     'SOL': ['So11111111111111111111111111111111111111112'],
@@ -1918,7 +2026,7 @@ export default function Home() {
   const filteredTrades = trades.filter(t => {
     const symbol = t.token_symbol.toUpperCase()
     // Filter out stablecoins
-    if (stablecoins.includes(symbol)) return false
+    if (STABLECOINS.includes(symbol)) return false
     // Filter out native/wrapped tokens (SOL, WETH, ETH)
     if (nativeTokens[symbol]) {
       const knownAddresses = nativeTokens[symbol]
@@ -1946,29 +2054,45 @@ export default function Home() {
 
   // Helper to get USD value for a trade
   const getTradeUsdValue = (trade: Trade): number => {
-    // PRIORITY 1: Use stored total_value_usd if available (most accurate)
-    if (trade.total_value_usd != null && trade.total_value_usd > 0) {
-      return trade.total_value_usd
-    }
-
-    // PRIORITY 2: For stablecoin base trades, entry_price * quantity = USD value
     const baseCurrency = ((trade as any).base_currency || '').toUpperCase()
-    const stablecoins = ['USDC', 'USDT', 'DAI', 'BUSD', 'UST', 'FRAX', 'TUSD', 'USDP', 'GUSD', 'LUSD', 'MIM', 'DOLA', 'CRVUSD', 'PYUSD']
-    if (stablecoins.includes(baseCurrency)) {
-      const calculatedValue = trade.entry_price * trade.quantity
-      if (calculatedValue > 0) return calculatedValue
+    const baseCurrencyUsdPrice = (trade as any).base_currency_usd_price || 0
+    const isStablecoin = STABLECOINS.includes(baseCurrency)
+
+    let result: number
+    let source: string
+
+    // PRIORITY 1: Use stored total_value_usd if available and reasonable
+    if (trade.total_value_usd != null && trade.total_value_usd > 0) {
+      result = trade.total_value_usd
+      source = 'total_value_usd'
+    }
+    // PRIORITY 2: For stablecoin base trades, total_value IS the USD value
+    else if (isStablecoin) {
+      result = trade.total_value
+      source = 'stablecoin'
+    }
+    // PRIORITY 3: For SOL base, convert using stored price
+    else if (baseCurrencyUsdPrice > 0) {
+      result = trade.total_value * baseCurrencyUsdPrice
+      source = 'sol_conversion'
+    }
+    // PRIORITY 4: Fallback - assume small values are SOL and convert
+    else if (trade.total_value < 100) {
+      // Likely SOL, use rough estimate
+      result = trade.total_value * 100 // rough SOL estimate
+      source = 'sol_estimate'
+    } else {
+      result = trade.total_value
+      source = 'fallback'
     }
 
-    // PRIORITY 3: For SOL/WETH base trades, convert using stored base_currency_usd_price
-    const baseCurrencyUsdPrice = (trade as any).base_currency_usd_price
-    if (baseCurrencyUsdPrice && baseCurrencyUsdPrice > 0) {
-      // total_value is in base currency (SOL), multiply by USD price
-      const usdValue = trade.total_value * baseCurrencyUsdPrice
-      if (usdValue > 0) return usdValue
+    // Debug logging for problem tokens
+    const debugTokens = ['GSD', 'LORIA']
+    if (debugTokens.includes(trade.token_symbol.toUpperCase())) {
+      console.log(`getTradeUsdValue [${trade.token_symbol}]: total_value=${trade.total_value}, total_value_usd=${trade.total_value_usd}, base=${baseCurrency}, base_price=${baseCurrencyUsdPrice}, result=${result.toFixed(2)}, source=${source}`)
     }
 
-    // PRIORITY 4: Fallback to total_value (might be wrong for non-USD bases)
-    return trade.total_value
+    return result
   }
 
   const positions: TokenPosition[] = Object.values(
@@ -2129,19 +2253,35 @@ export default function Home() {
     console.log(`  ${p.symbol}: invested=${p.totalInvestedUsd.toFixed(2)}, returned=${p.totalReturnedUsd.toFixed(2)}, buys=${p.buys.length}, sells=${p.sells.length}`)
   })
 
-  // Portfolio P&L: when initial capital and wallet balance are set, use them for accurate P&L
-  // P&L = (wallet_balance + open_position_value) - initial_capital
-  // This bypasses trade-by-trade calculation which can be inaccurate due to missing/duplicate trades
-  const hasPortfolioSettings = initialCapital !== null && walletBalance !== null
-  const portfolioPnl = hasPortfolioSettings
-    ? (walletBalance + totalUnrealizedValue) - initialCapital
-    : null
+  // Portfolio P&L calculation - prioritize user-entered values for accuracy
+  // Option 1: User entered total portfolio value directly (most accurate)
+  // Option 2: User entered wallet balance, calculate positions (less accurate)
+  // Option 3: Calculate everything from trades (least accurate)
+  const hasDirectTotal = totalPortfolioValue !== null && initialCapital !== null
+  const hasWalletSettings = walletBalance !== null && initialCapital !== null
+  const hasPortfolioSettings = hasDirectTotal || hasWalletSettings
+
+  let portfolioPnl: number | null = null
+  let displayValue: number
+
+  if (hasDirectTotal) {
+    // Use direct total from Fomo app - most accurate
+    portfolioPnl = totalPortfolioValue - initialCapital
+    displayValue = totalPortfolioValue
+  } else if (hasWalletSettings) {
+    // Use wallet balance + calculated positions
+    portfolioPnl = (walletBalance + totalUnrealizedValue) - initialCapital
+    displayValue = walletBalance + totalUnrealizedValue
+  } else {
+    displayValue = totalUnrealizedValue
+  }
+
   const tradePnl = totalRealizedPnl + totalUnrealizedPnl
 
   const totalPnlUsd = portfolioPnl !== null ? portfolioPnl : tradePnl
-  const totalInvestedUsd = hasPortfolioSettings ? initialCapital : (totalBuysUsd - totalSellsUsd)
-  const totalReturnedUsd = totalUnrealizedValue // Current value of open positions
-  const totalPnlPercent = hasPortfolioSettings && initialCapital > 0
+  const totalInvestedUsd = (hasDirectTotal || hasWalletSettings) ? initialCapital! : (totalBuysUsd - totalSellsUsd)
+  const totalReturnedUsd = displayValue
+  const totalPnlPercent = initialCapital && initialCapital > 0
     ? (totalPnlUsd / initialCapital) * 100
     : (totalOpenCostBasis > 0 ? (totalUnrealizedPnl / totalOpenCostBasis) * 100 :
       (totalBuysUsd > 0 ? (tradePnl / totalBuysUsd) * 100 : 0))

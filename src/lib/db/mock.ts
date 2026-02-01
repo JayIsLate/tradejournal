@@ -493,15 +493,53 @@ export const mockApi = {
 
     for (const trade of sorted) {
       if (duplicates.includes(trade.id)) continue
-      const dateOnly = trade.entry_date.split('T')[0]
       const qtyRounded = trade.quantity.toFixed(2)
-      const key = `${trade.token_symbol.toUpperCase()}-${trade.direction}-${qtyRounded}-${dateOnly}`
+      // Use contract address as primary identifier, fall back to symbol
+      const tokenId = trade.token_contract_address?.toLowerCase() || trade.token_symbol.toUpperCase()
+      // Use full timestamp for more precise matching
+      const key = `${tokenId}-${trade.direction}-${qtyRounded}-${trade.entry_date}`
 
       if (keySeen.has(key)) {
         duplicates.push(trade.id)
-        console.log(`Removing key duplicate: ${trade.token_symbol} qty=${qtyRounded} on ${dateOnly}`)
+        console.log(`Removing key duplicate: ${trade.token_symbol} qty=${qtyRounded} on ${trade.entry_date}`)
       } else {
         keySeen.set(key, trade)
+      }
+    }
+
+    // Strategy 4b: Remove exact duplicates (same qty, price, value, date - even if different IDs)
+    const exactSeen = new Map<string, Trade>()
+    const remaining2 = trades.filter(t => !duplicates.includes(t.id))
+    for (const trade of remaining2) {
+      const tokenId = trade.token_contract_address?.toLowerCase() || trade.token_symbol.toUpperCase()
+      const exactKey = `${tokenId}-${trade.direction}-${trade.quantity}-${trade.entry_price}-${trade.total_value}-${trade.entry_date}`
+      if (exactSeen.has(exactKey)) {
+        duplicates.push(trade.id)
+        console.log(`Removing exact duplicate: ${trade.token_symbol}`)
+      } else {
+        exactSeen.set(exactKey, trade)
+      }
+    }
+
+    // Strategy 4: Normalize token symbols for remaining trades (fix case mismatches like CLAWD vs clawd)
+    const finalRemaining = trades.filter(t => !duplicates.includes(t.id))
+    const contractToSymbol = new Map<string, string>()
+    for (const trade of finalRemaining) {
+      if (trade.token_contract_address) {
+        const contract = trade.token_contract_address.toLowerCase()
+        if (!contractToSymbol.has(contract)) {
+          contractToSymbol.set(contract, trade.token_symbol.toUpperCase())
+        }
+      }
+    }
+    // Log any mismatched symbols (for debugging)
+    for (const trade of finalRemaining) {
+      if (trade.token_contract_address) {
+        const contract = trade.token_contract_address.toLowerCase()
+        const expected = contractToSymbol.get(contract)
+        if (expected && trade.token_symbol.toUpperCase() !== expected) {
+          console.log(`Symbol mismatch: ${trade.token_symbol} vs ${expected} for contract ${contract}`)
+        }
       }
     }
 
