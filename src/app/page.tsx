@@ -358,6 +358,8 @@ export default function Home() {
   const recalculateUsdValues = async () => {
     if (!confirm('This will recalculate USD values for all trades using current SOL price. Your journal entries will be preserved. Continue?')) return
 
+    console.log('=== FIX USD STARTED ===')
+
     try {
       setSyncing(true)
 
@@ -373,6 +375,8 @@ export default function Home() {
       }
 
       const allTrades = await db.getTrades()
+      console.log(`Processing ${allTrades.length} trades...`)
+
       let updatedCount = 0
       let totalBefore = 0
       let totalAfter = 0
@@ -384,17 +388,24 @@ export default function Home() {
         const existingBaseUsdPrice = (trade as any).base_currency_usd_price
         const existingTotalValueUsd = trade.total_value_usd
 
+        // Debug GSD trades
+        if (trade.token_symbol?.toUpperCase().includes('GSD')) {
+          console.log(`GSD trade: id=${trade.id}, total_value=${trade.total_value}, base_currency=${existingBaseCurrency}, base_usd_price=${existingBaseUsdPrice}, total_value_usd=${existingTotalValueUsd}`)
+        }
+
         totalBefore += existingTotalValueUsd || trade.total_value
 
         // Determine base currency and USD price
         let baseCurrency = existingBaseCurrency
         let baseCurrencyUsdPrice = existingBaseUsdPrice
 
-        if (!baseCurrency || !baseCurrencyUsdPrice) {
+        // If base currency is already set and valid, use existing price
+        // Only recalculate if missing or invalid
+        if (!baseCurrency || baseCurrency === '' || !baseCurrencyUsdPrice || baseCurrencyUsdPrice <= 0) {
           // No base currency info - infer from trade context
-          // If total_value is very small (< 100), likely SOL-denominated
-          // If total_value is larger (100+), might be USDC
-          if (trade.total_value < 100) {
+          // If total_value is very small (< 50), likely SOL-denominated
+          // If total_value is larger, might be USDC
+          if (trade.total_value < 50) {
             baseCurrency = 'SOL'
             baseCurrencyUsdPrice = currentSolPrice
           } else {
@@ -411,6 +422,11 @@ export default function Home() {
         } else {
           // SOL/WETH base: multiply by USD price
           totalValueUsd = trade.total_value * baseCurrencyUsdPrice
+        }
+
+        // Debug GSD trades after calculation
+        if (trade.token_symbol?.toUpperCase().includes('GSD')) {
+          console.log(`GSD trade AFTER: baseCurrency=${baseCurrency}, baseCurrencyUsdPrice=${baseCurrencyUsdPrice}, totalValueUsd=${totalValueUsd}`)
         }
 
         totalAfter += totalValueUsd
@@ -2278,11 +2294,11 @@ export default function Home() {
               {lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
-          <div className="relative hidden md:block">
+          <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
             <Input
               placeholder="Search..."
-              className="pl-7 w-40 h-7 text-xs bg-muted border-0"
+              className="pl-7 w-24 md:w-40 h-7 text-xs bg-muted border-0"
               onChange={(e) => handleSearch(e.target.value)}
             />
           </div>
