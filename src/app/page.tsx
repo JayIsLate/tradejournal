@@ -385,48 +385,39 @@ export default function Home() {
 
       for (const trade of allTrades) {
         const existingBaseCurrency = ((trade as any).base_currency || '').toUpperCase()
-        const existingBaseUsdPrice = (trade as any).base_currency_usd_price
         const existingTotalValueUsd = trade.total_value_usd
-
-        // Debug GSD trades
-        if (trade.token_symbol?.toUpperCase().includes('GSD')) {
-          console.log(`GSD trade: id=${trade.id}, total_value=${trade.total_value}, base_currency=${existingBaseCurrency}, base_usd_price=${existingBaseUsdPrice}, total_value_usd=${existingTotalValueUsd}`)
-        }
 
         totalBefore += existingTotalValueUsd || trade.total_value
 
-        // Determine base currency and USD price
-        let baseCurrency = existingBaseCurrency
-        let baseCurrencyUsdPrice = existingBaseUsdPrice
+        // For Solana trades, ALWAYS recalculate based on total_value size
+        // Small values (< 10) are likely SOL amounts, larger values are likely already USD
+        let baseCurrency: string
+        let baseCurrencyUsdPrice: number
+        let totalValueUsd: number
 
-        // If base currency is already set and valid, use existing price
-        // Only recalculate if missing or invalid
-        if (!baseCurrency || baseCurrency === '' || !baseCurrencyUsdPrice || baseCurrencyUsdPrice <= 0) {
-          // No base currency info - infer from trade context
-          // If total_value is very small (< 50), likely SOL-denominated
-          // If total_value is larger, might be USDC
-          if (trade.total_value < 50) {
+        if (trade.token_chain === 'Solana' || trade.token_chain === 'solana') {
+          // Solana chain - determine if SOL or stablecoin based
+          if (trade.total_value < 10) {
+            // Small value = likely SOL (e.g., 0.25 SOL)
             baseCurrency = 'SOL'
             baseCurrencyUsdPrice = currentSolPrice
-          } else {
+            totalValueUsd = trade.total_value * currentSolPrice
+          } else if (trade.total_value < 500) {
+            // Medium value = could be either, but likely already USD from stablecoin trade
             baseCurrency = 'USDC'
             baseCurrencyUsdPrice = 1
+            totalValueUsd = trade.total_value
+          } else {
+            // Large value = definitely already USD
+            baseCurrency = 'USDC'
+            baseCurrencyUsdPrice = 1
+            totalValueUsd = trade.total_value
           }
-        }
-
-        // Calculate correct USD value
-        let totalValueUsd: number
-        if (stablecoins.includes(baseCurrency)) {
-          // Stablecoin base: total_value is already in USD
-          totalValueUsd = trade.total_value
         } else {
-          // SOL/WETH base: multiply by USD price
-          totalValueUsd = trade.total_value * baseCurrencyUsdPrice
-        }
-
-        // Debug GSD trades after calculation
-        if (trade.token_symbol?.toUpperCase().includes('GSD')) {
-          console.log(`GSD trade AFTER: baseCurrency=${baseCurrency}, baseCurrencyUsdPrice=${baseCurrencyUsdPrice}, totalValueUsd=${totalValueUsd}`)
+          // Non-Solana (Base, Ethereum) - keep existing or default
+          baseCurrency = existingBaseCurrency || 'USDC'
+          baseCurrencyUsdPrice = stablecoins.includes(baseCurrency) ? 1 : currentSolPrice
+          totalValueUsd = stablecoins.includes(baseCurrency) ? trade.total_value : trade.total_value * baseCurrencyUsdPrice
         }
 
         totalAfter += totalValueUsd
