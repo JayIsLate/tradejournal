@@ -74,10 +74,20 @@ export default function AnalyticsPage() {
   const [allPositions, setAllPositions] = useState<PositionStats[]>([])
   const [marketSentiment, setMarketSentiment] = useState<MarketSentiment | null>(null)
   const [loading, setLoading] = useState(true)
+  const [portfolioPnl, setPortfolioPnl] = useState<number | null>(null)
 
   useEffect(() => {
     async function loadData() {
       try {
+        // Load portfolio settings for accurate P&L display
+        const savedTotalPortfolio = localStorage.getItem('totalPortfolioValue')
+        const savedInitialCapital = localStorage.getItem('initialCapital')
+        const totalPortfolioValue = savedTotalPortfolio ? parseFloat(savedTotalPortfolio) : null
+        const initialCapital = savedInitialCapital ? parseFloat(savedInitialCapital) : null
+
+        if (totalPortfolioValue !== null && initialCapital !== null) {
+          setPortfolioPnl(totalPortfolioValue - initialCapital)
+        }
         // Fetch market sentiment data (BTC, SOL, ETH 24h performance)
         try {
           const sentimentRes = await fetch(
@@ -275,7 +285,14 @@ export default function AnalyticsPage() {
         setBestTrade(best)
         setWorstTrade(worst && worst.realizedPnl < 0 ? worst : null)
 
-        const totalPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+        // Realized P&L from closed positions
+        const realizedPnl = closedPositions.reduce((sum, p) => sum + p.realizedPnl, 0)
+
+        // Use portfolio P&L (from user settings) if available, otherwise use realized P&L
+        const portfolioP = (totalPortfolioValue !== null && initialCapital !== null)
+          ? totalPortfolioValue - initialCapital
+          : null
+        const totalPnl = portfolioP !== null ? portfolioP : realizedPnl
         const winRate = closedPositions.length > 0 ? (winners.length / closedPositions.length) * 100 : 0
 
         const avgWin = winners.length > 0 ? winners.reduce((sum, p) => sum + p.realizedPnl, 0) / winners.length : 0

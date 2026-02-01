@@ -2363,7 +2363,7 @@ export default function Home() {
                 <div className="h-6 w-px bg-border hidden md:block" />
                 <div className="flex-shrink-0">
                   <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Wallet</div>
-                  <div className="text-sm font-medium tabular-nums">{formatCurrency(walletBalance)}</div>
+                  <div className="text-sm font-medium tabular-nums">{formatCurrency(walletBalance ?? 0)}</div>
                 </div>
               </>
             )}
