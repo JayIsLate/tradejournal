@@ -1489,8 +1489,22 @@ export default function Home() {
                 url += `&block_number=${nextPageParams.block_number}&index=${nextPageParams.index}`
               }
 
-              const res = await fetch(url)
-              if (!res.ok) {
+              // Add retry logic for transient failures
+              let res: Response | null = null
+              for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                  if (attempt > 0) {
+                    await new Promise(r => setTimeout(r, 1000 * attempt)) // Backoff
+                  }
+                  res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+                  if (res.ok) break
+                } catch (fetchErr) {
+                  console.log(`Base sync: fetch attempt ${attempt + 1} failed, retrying...`)
+                  if (attempt === 2) throw fetchErr
+                }
+              }
+
+              if (!res || !res.ok) {
                 console.log('Base sync: Blockscout fetch failed for', wallet.address)
                 break
               }
@@ -1568,8 +1582,10 @@ export default function Home() {
               // Fetch tx details from Blockscout to find USDC amount (AA architecture)
               let usdcAmount = 0
               try {
-                await new Promise(resolve => setTimeout(resolve, 200)) // Rate limit
-                const txRes = await fetch(`https://base.blockscout.com/api/v2/transactions/${txHash}`)
+                await new Promise(resolve => setTimeout(resolve, 300)) // Rate limit
+                const txRes = await fetch(`https://base.blockscout.com/api/v2/transactions/${txHash}`, {
+                  signal: AbortSignal.timeout(10000)
+                })
                 if (txRes.ok) {
                   const txDetails = await txRes.json()
                   const txTokenTransfers = txDetails.token_transfers || []
