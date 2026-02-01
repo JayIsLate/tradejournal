@@ -205,11 +205,22 @@ export default function AnalyticsPage() {
 
             const avgBuyPrice = totalBought > 0 ? totalInvested / totalBought : 0
             const avgSellPrice = totalSold > 0 ? totalReturned / totalSold : 0
-            // Realized P&L = what you got back minus cost basis of sold tokens
-            const costBasisOfSold = totalBought > 0 ? (totalInvested / totalBought) * totalSold : 0
-            const realizedPnl = totalReturned - costBasisOfSold
-            // P&L percent should be based on cost basis of what was sold, not total invested
-            const pnlPercent = costBasisOfSold > 0 ? (realizedPnl / costBasisOfSold) * 100 : 0
+
+            // Realized P&L calculation
+            // For closed/mostly-closed positions: P&L = returned - invested
+            // Cap quantity sold at quantity bought to avoid cost basis inflation from missing buys
+            const effectiveSoldQty = Math.min(totalSold, totalBought)
+            const costBasisOfSold = totalBought > 0
+              ? (totalInvested / totalBought) * effectiveSoldQty
+              : totalInvested
+
+            // If sold more than we have records of buying, use simple: returned - invested
+            const realizedPnl = totalSold > totalBought
+              ? totalReturned - totalInvested
+              : totalReturned - costBasisOfSold
+
+            // P&L percent based on what was actually invested/sold
+            const pnlPercent = totalInvested > 0 ? (realizedPnl / totalInvested) * 100 : 0
 
             const allTrades = [...pos.buys, ...pos.sells].sort((a, b) =>
               new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
