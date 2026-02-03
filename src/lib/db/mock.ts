@@ -245,7 +245,10 @@ export const mockApi = {
     initFromStorage()
     const upperSymbol = tokenSymbol.toUpperCase()
     tokenTags = tokenTags.filter(tt => tt.token_symbol.toUpperCase() !== upperSymbol)
-    tagIds.forEach(tagId => tokenTags.push({ token_symbol: upperSymbol, tag_id: tagId }))
+    // Guard against undefined tagIds
+    if (tagIds && Array.isArray(tagIds)) {
+      tagIds.forEach(tagId => tokenTags.push({ token_symbol: upperSymbol, tag_id: tagId }))
+    }
     setStorage(STORAGE_KEYS.tokenTags, tokenTags)
     return { success: true }
   },

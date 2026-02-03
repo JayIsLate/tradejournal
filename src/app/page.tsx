@@ -1803,7 +1803,7 @@ export default function Home() {
         copy_trader: journal.copyTrader || null,
       }
       const savedNote = await db.upsertTokenNote(noteData)
-      await db.setTokenTags(symbol, journal.tagIds)
+      await db.setTokenTags(symbol, journal.tagIds || [])
 
       setTokenJournals(prev => {
         const updated = {
