@@ -1481,7 +1481,7 @@ export default function Home() {
             let allTransfers: any[] = []
             let nextPageParams: any = null
             let pageCount = 0
-            const maxPages = 10 // Lighter for sync vs full import
+            const maxPages = 20 // Increased for better coverage of recent trades
 
             while (pageCount < maxPages) {
               let url = `https://base.blockscout.com/api/v2/addresses/${wallet.address}/token-transfers?type=ERC-20`
@@ -1625,8 +1625,8 @@ export default function Home() {
                     }
                   }
 
-                  // WETH fallback: some sells route through WETH instead of USDC
-                  if (usdcAmount === 0 && isSell) {
+                  // WETH fallback: some trades route through WETH instead of USDC
+                  if (usdcAmount === 0) {
                     let maxWethAmount = 0
                     for (const tt of txTokenTransfers) {
                       const ttToken = tt.token || {}
@@ -1645,12 +1645,39 @@ export default function Home() {
                       console.log(`Base sync: WETH fallback ${maxWethAmount.toFixed(6)} WETH = $${usdcAmount.toFixed(2)}`)
                     }
                   }
+
+                  // Native ETH fallback: check tx.value for native ETH payments
+                  if (usdcAmount === 0 && txDetails.value) {
+                    const ethValue = Number(txDetails.value) / 1e18
+                    if (ethValue > 0) {
+                      usdcAmount = ethValue * baseEthUsdPrice
+                      console.log(`Base sync: native ETH fallback ${ethValue.toFixed(6)} ETH = $${usdcAmount.toFixed(2)}`)
+                    }
+                  }
+
+                  // Last resort: try to find ANY token transfer with reasonable value
+                  if (usdcAmount === 0) {
+                    for (const tt of txTokenTransfers) {
+                      const ttTotal = tt.total || {}
+                      const ttDec = parseInt(ttTotal.decimals || '6')
+                      const ttValue = Number(ttTotal.value || '0') / Math.pow(10, ttDec)
+                      if (ttValue > 0 && ttValue < 1000000) { // Reasonable USD range
+                        usdcAmount = ttValue
+                        console.log(`Base sync: fallback value detection: $${usdcAmount.toFixed(2)}`)
+                        break
+                      }
+                    }
+                  }
                 }
               } catch (e) {
                 console.log(`Base sync: failed to fetch tx details for ${txHash.slice(0, 12)}...`)
               }
 
-              if (usdcAmount === 0) continue
+              // Skip only if we have absolutely no value info
+              if (usdcAmount === 0) {
+                console.log(`Base sync: skipping ${memeToken.symbol || 'unknown'} - no USD value found`)
+                continue
+              }
 
               const memeSymbol = memeToken.symbol || 'Unknown'
               const memeName = memeToken.name || null
