@@ -71,4 +71,11 @@ export const db = {
 
   // Utilities
   removeDuplicateTrades: (): Promise<{ removed: number; kept: number }> => (getApi() as any).removeDuplicateTrades(),
+
+  // Hidden Tokens (won't reappear after sync)
+  getHiddenTokens: (): Promise<string[]> => (getApi() as any).getHiddenTokens(),
+  hideToken: (identifier: string): Promise<{ success: boolean }> => (getApi() as any).hideToken(identifier),
+  unhideToken: (identifier: string): Promise<{ success: boolean }> => (getApi() as any).unhideToken(identifier),
+  isTokenHidden: (identifier: string): Promise<boolean> => (getApi() as any).isTokenHidden(identifier),
+  deleteAndHideToken: (symbol: string, contractAddress?: string | null): Promise<{ success: boolean }> => (getApi() as any).deleteAndHideToken(symbol, contractAddress),
 }

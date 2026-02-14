@@ -128,6 +128,9 @@ export default function Home() {
   const [newTradesCount, setNewTradesCount] = useState(0)
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Hidden tokens (won't reappear after sync)
+  const [hiddenTokens, setHiddenTokens] = useState<string[]>([])
+
   useEffect(() => {
     loadData()
   }, [])
@@ -234,17 +237,19 @@ export default function Home() {
 
   const loadData = async () => {
     try {
-      const [tradesData, tagsData, savedCapital, savedBalance, savedTotalValue] = await Promise.all([
+      const [tradesData, tagsData, savedCapital, savedBalance, savedTotalValue, hiddenTokensList] = await Promise.all([
         db.getTrades(),
         db.getTags(),
         db.getSetting('initial_capital'),
         db.getSetting('wallet_balance'),
         db.getSetting('total_portfolio_value'),
+        db.getHiddenTokens(),
       ])
 
       if (savedCapital) setInitialCapital(parseFloat(savedCapital))
       if (savedBalance) setWalletBalance(parseFloat(savedBalance))
       if (savedTotalValue) setTotalPortfolioValue(parseFloat(savedTotalValue))
+      setHiddenTokens(hiddenTokensList)
 
       // Debug: Log ALL trades to understand the corrupt data
       console.log('%c=== TRADE DATA DEBUG ===', 'background: red; color: white; font-size: 16px')
@@ -1193,6 +1198,14 @@ export default function Home() {
             continue
           }
 
+          // Check if token is hidden (user deleted it)
+          const currentHidden = await db.getHiddenTokens()
+          if (currentHidden.includes(symbolUpper.toLowerCase()) ||
+              (contractLower && currentHidden.includes(contractLower))) {
+            console.log(`  SKIPPED: token is hidden ${symbolUpper}`)
+            continue
+          }
+
           console.log(`  ADDING trade: direction=${finalIsBuy ? 'buy' : 'sell'}, symbol=${tradeToken.symbol}`)
           if (txSignature) existingSignatures.add(txSignature)
           existingKeys.add(key)
@@ -1697,6 +1710,14 @@ export default function Home() {
               const key = `${memeSymbol}-${isBuy ? 'buy' : 'sell'}-${dateOnly}-${memeAmount.toFixed(4)}`
               if (existingKeys.has(key)) continue
 
+              // Check if token is hidden (user deleted it)
+              const currentHidden = await db.getHiddenTokens()
+              if (currentHidden.includes(memeSymbol.toLowerCase()) ||
+                  (memeAddress && currentHidden.includes(memeAddress))) {
+                console.log(`Base sync: SKIPPED hidden token ${memeSymbol}`)
+                continue
+              }
+
               console.log(`Base sync: ${isBuy ? 'BUY' : 'SELL'} ${memeSymbol}, qty: ${memeAmount.toFixed(4)}, value: $${usdcAmount.toFixed(2)}`)
 
               existingSignatures.add(txHash)
@@ -1943,18 +1964,25 @@ export default function Home() {
 
   const handleDeleteToken = async (contractAddress: string | null, symbol: string) => {
     try {
-      // Filter by contract address if available, otherwise by symbol
-      const tokenTrades = contractAddress
-        ? trades.filter(t => t.token_contract_address?.toLowerCase() === contractAddress.toLowerCase())
-        : trades.filter(t => t.token_symbol.toUpperCase() === symbol.toUpperCase() && !t.token_contract_address)
+      // Delete all trades and hide the token so it doesn't come back on sync
+      await db.deleteAndHideToken(symbol, contractAddress)
 
-      for (const trade of tokenTrades) {
-        await db.deleteTrade(trade.id)
+      // Update hidden tokens state
+      const newHidden = [...hiddenTokens]
+      if (!newHidden.includes(symbol.toLowerCase())) {
+        newHidden.push(symbol.toLowerCase())
       }
+      if (contractAddress && !newHidden.includes(contractAddress.toLowerCase())) {
+        newHidden.push(contractAddress.toLowerCase())
+      }
+      setHiddenTokens(newHidden)
 
-      const remainingTrades = contractAddress
-        ? trades.filter(t => t.token_contract_address?.toLowerCase() !== contractAddress.toLowerCase())
-        : trades.filter(t => !(t.token_symbol.toUpperCase() === symbol.toUpperCase() && !t.token_contract_address))
+      // Update local trades state
+      const remainingTrades = trades.filter(t => {
+        const matchesSymbol = t.token_symbol.toUpperCase() === symbol.toUpperCase()
+        const matchesContract = contractAddress && t.token_contract_address?.toLowerCase() === contractAddress.toLowerCase()
+        return !matchesSymbol && !matchesContract
+      })
 
       setTrades(remainingTrades)
       setExpandedToken(null)
@@ -2077,6 +2105,14 @@ export default function Home() {
 
   const filteredTrades = trades.filter(t => {
     const symbol = t.token_symbol.toUpperCase()
+    const contractAddr = t.token_contract_address?.toLowerCase()
+
+    // Filter out hidden tokens (user deleted them)
+    if (hiddenTokens.includes(symbol.toLowerCase()) ||
+        (contractAddr && hiddenTokens.includes(contractAddr))) {
+      return false
+    }
+
     // Filter out stablecoins
     if (STABLECOINS.includes(symbol)) return false
     // Filter out native/wrapped tokens (SOL, WETH, ETH)

@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   influencerCalls: 'tj_influencer_calls',
   reviews: 'tj_reviews',
   settings: 'tj_settings',
+  hiddenTokens: 'tj_hidden_tokens',
 }
 
 // Helper to safely access localStorage (not available during SSR)
@@ -45,6 +46,7 @@ let influencers: Influencer[] = []
 let influencerCalls: InfluencerCall[] = []
 let reviews: Review[] = []
 let settings: Record<string, string> = {}
+let hiddenTokens: string[] = [] // Contract addresses or symbols of hidden tokens
 
 // Initialize from localStorage on first access
 let initialized = false
@@ -61,6 +63,7 @@ const initFromStorage = () => {
   influencerCalls = getStorage(STORAGE_KEYS.influencerCalls, [])
   reviews = getStorage(STORAGE_KEYS.reviews, [])
   settings = getStorage(STORAGE_KEYS.settings, {})
+  hiddenTokens = getStorage(STORAGE_KEYS.hiddenTokens, [])
 }
 
 export const mockApi = {
@@ -576,5 +579,64 @@ export const mockApi = {
     })
 
     return results.slice(0, 15)
+  },
+
+  // Hidden Tokens - tokens that should not reappear after sync
+  getHiddenTokens: async (): Promise<string[]> => {
+    initFromStorage()
+    return [...hiddenTokens]
+  },
+
+  hideToken: async (identifier: string): Promise<{ success: boolean }> => {
+    initFromStorage()
+    const normalized = identifier.toLowerCase()
+    if (!hiddenTokens.includes(normalized)) {
+      hiddenTokens.push(normalized)
+      setStorage(STORAGE_KEYS.hiddenTokens, hiddenTokens)
+    }
+    return { success: true }
+  },
+
+  unhideToken: async (identifier: string): Promise<{ success: boolean }> => {
+    initFromStorage()
+    const normalized = identifier.toLowerCase()
+    hiddenTokens = hiddenTokens.filter(t => t !== normalized)
+    setStorage(STORAGE_KEYS.hiddenTokens, hiddenTokens)
+    return { success: true }
+  },
+
+  isTokenHidden: async (identifier: string): Promise<boolean> => {
+    initFromStorage()
+    return hiddenTokens.includes(identifier.toLowerCase())
+  },
+
+  // Delete token and hide it permanently
+  deleteAndHideToken: async (symbol: string, contractAddress?: string | null): Promise<{ success: boolean }> => {
+    initFromStorage()
+    // Remove all trades for this token
+    const upperSymbol = symbol.toUpperCase()
+    trades = trades.filter(t => {
+      const matchesSymbol = t.token_symbol.toUpperCase() === upperSymbol
+      const matchesContract = contractAddress && t.token_contract_address?.toLowerCase() === contractAddress.toLowerCase()
+      return !matchesSymbol && !matchesContract
+    })
+    setStorage(STORAGE_KEYS.trades, trades)
+
+    // Also remove token notes and tags
+    tokenNotes = tokenNotes.filter(n => n.token_symbol.toUpperCase() !== upperSymbol)
+    setStorage(STORAGE_KEYS.tokenNotes, tokenNotes)
+    tokenTags = tokenTags.filter(tt => tt.token_symbol.toUpperCase() !== upperSymbol)
+    setStorage(STORAGE_KEYS.tokenTags, tokenTags)
+
+    // Hide both symbol and contract address so it doesn't come back
+    if (!hiddenTokens.includes(upperSymbol.toLowerCase())) {
+      hiddenTokens.push(upperSymbol.toLowerCase())
+    }
+    if (contractAddress && !hiddenTokens.includes(contractAddress.toLowerCase())) {
+      hiddenTokens.push(contractAddress.toLowerCase())
+    }
+    setStorage(STORAGE_KEYS.hiddenTokens, hiddenTokens)
+
+    return { success: true }
   }
 }
