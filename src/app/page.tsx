@@ -1481,7 +1481,7 @@ export default function Home() {
             let allTransfers: any[] = []
             let nextPageParams: any = null
             let pageCount = 0
-            const maxPages = 20 // Increased for better coverage of recent trades
+            const maxPages = 10 // Keep light for sync responsiveness
 
             while (pageCount < maxPages) {
               let url = `https://base.blockscout.com/api/v2/addresses/${wallet.address}/token-transfers?type=ERC-20`
@@ -1543,10 +1543,18 @@ export default function Home() {
             }
 
             let aaUserAddress: string | null = null // Discovered from first buy tx
+            let newTxCount = 0
+            const maxNewTxPerSync = 50 // Limit to prevent sync from getting stuck
 
             for (const [txHash, txData] of Object.entries(txMap)) {
               // Skip if already imported
               if (existingSignatures.has(txHash)) continue
+
+              // Limit new transactions per sync
+              if (newTxCount >= maxNewTxPerSync) {
+                console.log(`Base sync: reached limit of ${maxNewTxPerSync} new transactions, will continue next sync`)
+                break
+              }
 
               const { transfers, method, timestamp } = txData
 
@@ -1582,7 +1590,7 @@ export default function Home() {
               // Fetch tx details from Blockscout to find USDC amount (AA architecture)
               let usdcAmount = 0
               try {
-                await new Promise(resolve => setTimeout(resolve, 300)) // Rate limit
+                await new Promise(resolve => setTimeout(resolve, 150)) // Rate limit
                 const txRes = await fetch(`https://base.blockscout.com/api/v2/transactions/${txHash}`, {
                   signal: AbortSignal.timeout(10000)
                 })
@@ -1721,6 +1729,7 @@ export default function Home() {
                 total_value_usd: usdcAmount,
               }
               newTrades.push(newTrade)
+              newTxCount++
             }
           } catch (e) {
             console.error('Base sync error for wallet', wallet.address, e)
